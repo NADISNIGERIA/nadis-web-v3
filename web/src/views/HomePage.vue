@@ -151,40 +151,7 @@ export default defineComponent({
   <div class="home">
     <pages-top :title="'Dashboard Overview'"></pages-top>
     <div class="pt-12 px-6">
-            <div class="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-3 gap-6">
-        <!-- Total Reports Card -->
-        <div class="bg-white rounded-2xl shadow-lg hover:shadow-xl transition-all duration-300 overflow-hidden group">
-          <div class="p-6">
-            <div class="flex items-center justify-between">
-              <div class="flex-1">
-                <div class="flex items-center mb-4">
-                  <div class="w-14 h-14 bg-card-5 rounded-xl flex items-center justify-center mr-4 group-hover:scale-110 transition-transform duration-300">
-                    <svg class="w-7 h-7 text-primary" fill="currentColor" viewBox="0 0 24 24">
-                      <path d="M3 13h8V3H3v10zm0 8h8v-6H3v6zm10 0h8V11h-8v10zm5-18v4h3V3h-3z"/>
-                    </svg>
-                  </div>
-                  <div class="text-left">
-                    <p class="text-xl font-semibold text-nadis-black">Reports</p>
-                    <p class="text-sm text-nadis-ash text-left">All submissions</p>
-                  </div>
-                </div>
-                <p class="text-5xl font-black text-nadis-black tracking-tight leading-none">
-                  {{
-                    abattoir +
-                    aquaculture +
-                    laboratory +
-                    outbreak +
-                    suspicion +
-                    vaccination +
-                    veterinarian
-                  }}
-                </p>
-              </div>
-            </div>
-          </div>
-          <div class="h-1 bg-gradient-to-r from-primary to-primary-2"></div>
-        </div>
-
+      <div class="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-5 gap-6">
         <!-- Total Approved Card -->
         <div class="bg-white rounded-2xl shadow-lg hover:shadow-xl transition-all duration-300 overflow-hidden group">
           <div class="p-6">
