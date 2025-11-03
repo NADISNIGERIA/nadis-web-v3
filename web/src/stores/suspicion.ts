@@ -1,0 +1,285 @@
+import fb from '@/services/firebase'
+import { emitReportStatsUpdate, REPORT_TYPES } from '@/services/reportStatsHelpers'
+import { collection, doc, getDoc, getDocs, query, updateDoc, where, orderBy, limit, startAfter } from 'firebase/firestore'
+import { defineStore } from 'pinia'
+
+export const useSuspicion = defineStore('suspicion', {
+  state: () => ({
+    suspicion: [],
+    reporter_state: [] as any,
+    loading: false,
+    successful: 0,
+    pagination: {
+      currentPage: 1,
+      pageSize: 20,
+      hasMore: true,
+      lastVisible: null
+    },
+    cache: new Map()
+  }),
+  actions: {
+    // Cache management methods
+    getCacheKey(values: any): string {
+      return JSON.stringify({
+        state: values.state,
+        in_progress: values.in_progress,
+        category: values.category
+      })
+    },
+
+    isCacheValid(timestamp: number): boolean {
+      const CACHE_DURATION = 5 * 60 * 1000 // 5 minutes
+      return Date.now() - timestamp < CACHE_DURATION
+    },
+
+    getCachedData(values: any) {
+      const key = this.getCacheKey(values)
+      const cached = this.cache.get(key)
+      if (cached && this.isCacheValid(cached.timestamp)) {
+        return cached.data
+      }
+      return null
+    },
+
+    setCachedData(values: any, data: any) {
+      const key = this.getCacheKey(values)
+      this.cache.set(key, {
+        data: [...data],
+        timestamp: Date.now()
+      })
+    },
+
+    // Clear all cache data
+    clearCache() {
+      this.cache.clear()
+    },
+
+    resetPagination() {
+      this.pagination.currentPage = 1
+      this.pagination.hasMore = true
+      this.pagination.lastVisible = null
+    },
+    async show_in_progress_a_state(state: any) {
+      this.suspicion = []
+      const docs = await getDocs(
+        query(
+          collection(fb.db, 'suspicion_reports'),
+          where('state', '==', state),
+          where('finished', '==', false)
+        )
+      )
+      const value = [] as any
+      this.reporter_state = []
+      docs.forEach((doc) => {
+        const unit = doc.data()
+        unit.doc_id = doc.id
+        this.getReporterState({
+          uid: doc.data().uid,
+          doc_id: doc.id
+        })
+        value.push(unit)
+      })
+      this.suspicion = value.sort((a: any, b: any) => b.created_at - a.created_at)
+    },
+    async show_in_progress_all_states() {
+      this.suspicion = []
+      const docs = await getDocs(
+        query(collection(fb.db, 'suspicion_reports'), where('finished', '==', false))
+      )
+      const value = [] as any
+      this.reporter_state = []
+      docs.forEach((doc) => {
+        const unit = doc.data()
+        unit.doc_id = doc.id
+        this.getReporterState({
+          uid: doc.data().uid,
+          doc_id: doc.id
+        })
+        value.push(unit)
+      })
+      this.suspicion = value.sort((a: any, b: any) => b.created_at - a.created_at)
+    },
+    async getSuspicion(values: any, isNextPage = false, pageSize = 20) {
+      try {
+        this.loading = true
+        const state = values.state
+
+        // Check cache first (unless getting next page)
+        if (!isNextPage) {
+          const cached = this.getCachedData(values)
+          if (cached) {
+            this.suspicion = cached
+            this.loading = false
+            return
+          }
+          this.resetPagination()
+        }
+
+        if (values.in_progress == true) {
+          if (state != 'All States') {
+            await this.show_in_progress_a_state(state)
+          } else {
+            await this.show_in_progress_all_states()
+          }
+        } else if (values.in_progress == false) {
+          let sort = false
+          if (values.category) {
+            sort = true
+          } else {
+            sort = false
+          }
+
+          // Build query without orderBy to avoid composite index requirement
+          let queryRef: any
+
+          if (state != 'All States') {
+            queryRef = query(
+              collection(fb.db, 'suspicion_reports'),
+              where('approved', '==', sort),
+              where('state', '==', state),
+              where('finished', '==', true),
+              limit(pageSize)
+            )
+          } else {
+            queryRef = query(
+              collection(fb.db, 'suspicion_reports'),
+              where('approved', '==', sort),
+              where('finished', '==', true),
+              limit(pageSize)
+            )
+          }
+
+          // Add pagination cursor
+          if (isNextPage && this.pagination.lastVisible) {
+            if (state != 'All States') {
+              queryRef = query(
+                collection(fb.db, 'suspicion_reports'),
+                where('approved', '==', sort),
+                where('state', '==', state),
+                where('finished', '==', true),
+                startAfter(this.pagination.lastVisible),
+                limit(pageSize)
+              )
+            } else {
+              queryRef = query(
+                collection(fb.db, 'suspicion_reports'),
+                where('approved', '==', sort),
+                where('finished', '==', true),
+                startAfter(this.pagination.lastVisible),
+                limit(pageSize)
+              )
+            }
+          }
+
+          const docs = await getDocs(queryRef)
+          let value = [] as any
+
+          if (!isNextPage) {
+            this.suspicion = []
+            this.reporter_state = []
+            this.pagination.currentPage = 1
+          } else {
+            value = [...this.suspicion]
+            this.pagination.currentPage++
+          }
+
+          docs.forEach((doc) => {
+            const unit = doc.data()
+            unit.doc_id = doc.id
+            this.getReporterState({
+              uid: doc.data().uid,
+              doc_id: doc.id
+            })
+            value.push(unit)
+          })
+
+          // Sort by created_at descending (client-side)
+          if (!isNextPage) {
+            value.sort((a: any, b: any) => b.created_at - a.created_at)
+          }
+
+          this.pagination.lastVisible = docs.docs[docs.docs.length - 1] || null
+          this.pagination.hasMore = docs.docs.length === pageSize
+          this.pagination.pageSize = pageSize
+
+          this.suspicion = value
+
+          if (!isNextPage) {
+            this.setCachedData(values, value)
+          }
+        }
+      } catch (error) {
+        console.error('Error fetching suspicion reports:', error)
+      } finally {
+        this.loading = false
+      }
+    },
+
+    async loadNextPage(values: any) {
+      if (this.pagination.hasMore && !this.loading) {
+        await this.getSuspicion(values, true, this.pagination.pageSize)
+      }
+    },
+    async approve(doc_id: any) {
+      this.loading = true
+      const suspicion_doc = await getDoc(doc(fb.db, 'suspicion_reports', doc_id))
+
+      if (suspicion_doc.exists()) {
+        if (suspicion_doc.data().decline == undefined) {
+          await updateDoc(doc(fb.db, 'suspicion_reports', doc_id), {
+            approved: true,
+            finished: true
+          })
+          this.loading = false
+          this.successful += 1
+          emitReportStatsUpdate(REPORT_TYPES.SUSPICION, 'approve', doc_id, this)
+        } else if (suspicion_doc.data().decline != undefined) {
+          await updateDoc(doc(fb.db, 'suspicion_reports', doc_id), {
+            approved: true,
+            finished: true,
+            decline: null
+          })
+          this.loading = false
+          this.successful += 1
+          emitReportStatsUpdate(REPORT_TYPES.SUSPICION, 'approve', doc_id, this)
+        }
+      }
+    },
+    async pending(doc_id: any) {
+      this.loading = true
+      await updateDoc(doc(fb.db, 'suspicion_reports', doc_id), { approved: false })
+      this.loading = false
+      this.successful += 1
+      emitReportStatsUpdate(REPORT_TYPES.SUSPICION, 'pending', doc_id, this)
+    },
+    async in_progress(doc_id: any) {
+      this.loading = true
+      await updateDoc(doc(fb.db, 'suspicion_reports', doc_id), { approved: false, finished: false })
+      this.loading = false
+      this.successful += 1
+      emitReportStatsUpdate(REPORT_TYPES.SUSPICION, 'in_progress', doc_id, this)
+    },
+    async decline(payload: any) {
+      const { doc_id, is_decline, reason_for_decline } = payload
+      this.loading = true
+      await updateDoc(doc(fb.db, 'suspicion_reports', doc_id), {
+        'decline.is_decline': is_decline,
+        'decline.reason_for_decline': reason_for_decline,
+        approved: false,
+        finished: false
+      })
+      this.loading = false
+      this.successful += 1
+      emitReportStatsUpdate(REPORT_TYPES.SUSPICION, 'decline', doc_id, this)
+    },
+    async getReporterState(payload: any) {
+      const reporterDoc = await getDoc(doc(fb.db, 'users', payload.uid))
+      if (reporterDoc.exists()) {
+        this.reporter_state.push({
+          state_lga: reporterDoc.data().stateLga,
+          doc_id: payload.doc_id
+        })
+      }
+    }
+  }
+})

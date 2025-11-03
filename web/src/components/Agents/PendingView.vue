@@ -1,0 +1,475 @@
+<script lang="ts">
+import { usePendingAgents } from './../../stores/pending_agents'
+import { computed, defineComponent, onMounted, ref, watch } from 'vue'
+import PendingDetails from './PendingDetails.vue'
+
+export default defineComponent({
+  components: { PendingDetails },
+  props: {
+    full: Boolean
+  },
+  setup() {
+    const show = ref(false)
+    const agent = ref({}) as any
+    const searchQuery = ref('')
+    const currentPage = ref(1)
+    const itemsPerPage = ref(10)
+    const sortField = ref('fullname')
+    const sortDirection = ref('asc')
+    const loading = ref(false)
+    
+    const pending_agents = computed(() => usePendingAgents().pending_agents) as any
+
+    // Filtered and sorted agents
+    const filteredAgents = computed(() => {
+      if (!pending_agents.value) return []
+      
+      let filtered = pending_agents.value.filter((agent: any) => {
+        const searchLower = searchQuery.value.toLowerCase()
+        return (
+          agent.details.fullname?.toLowerCase().includes(searchLower) ||
+          agent.details.email?.toLowerCase().includes(searchLower) ||
+          agent.details.phoneNumber?.includes(searchQuery.value) ||
+          agent.stateLga.state?.toLowerCase().includes(searchLower) ||
+          agent.stateLga.lga?.toLowerCase().includes(searchLower)
+        )
+      })
+
+      // Sort the filtered results
+      filtered.sort((a: any, b: any) => {
+        let aValue = ''
+        let bValue = ''
+        
+        switch (sortField.value) {
+          case 'fullname':
+            aValue = a.details.fullname || ''
+            bValue = b.details.fullname || ''
+            break
+          case 'email':
+            aValue = a.details.email || ''
+            bValue = b.details.email || ''
+            break
+          case 'phone':
+            aValue = a.details.phoneNumber || ''
+            bValue = b.details.phoneNumber || ''
+            break
+          case 'state':
+            aValue = a.stateLga.state || ''
+            bValue = b.stateLga.state || ''
+            break
+          case 'lga':
+            aValue = a.stateLga.lga || ''
+            bValue = b.stateLga.lga || ''
+            break
+        }
+
+        if (sortDirection.value === 'asc') {
+          return aValue.localeCompare(bValue)
+        } else {
+          return bValue.localeCompare(aValue)
+        }
+      })
+
+      return filtered
+    })
+
+    // Paginated agents
+    const paginatedAgents = computed(() => {
+      const start = (currentPage.value - 1) * itemsPerPage.value
+      const end = start + itemsPerPage.value
+      return filteredAgents.value.slice(start, end)
+    })
+
+    // Total pages
+    const totalPages = computed(() => {
+      return Math.ceil(filteredAgents.value.length / itemsPerPage.value)
+    })
+
+    // Pagination info
+    const paginationInfo = computed(() => {
+      const start = (currentPage.value - 1) * itemsPerPage.value + 1
+      const end = Math.min(currentPage.value * itemsPerPage.value, filteredAgents.value.length)
+      return {
+        start,
+        end,
+        total: filteredAgents.value.length
+      }
+    })
+
+    const showDetails = (selectedAgent: any) => {
+      agent.value = selectedAgent
+      show.value = true
+    }
+
+    const openModal = (val: any) => {
+      show.value = val
+    }
+
+    const sort = (field: string) => {
+      if (sortField.value === field) {
+        sortDirection.value = sortDirection.value === 'asc' ? 'desc' : 'asc'
+      } else {
+        sortField.value = field
+        sortDirection.value = 'asc'
+      }
+    }
+
+    const changePage = (page: number) => {
+      if (page >= 1 && page <= totalPages.value) {
+        currentPage.value = page
+      }
+    }
+
+    const changeItemsPerPage = (items: number) => {
+      itemsPerPage.value = items
+      currentPage.value = 1 // Reset to first page
+    }
+
+    // Reset to first page when search changes
+    watch(searchQuery, () => {
+      currentPage.value = 1
+    })
+
+    onMounted(() => {
+      loading.value = true
+      usePendingAgents().pendingAgents()
+      loading.value = false
+    })
+
+    return { 
+      pending_agents,
+      show, 
+      agent,
+      searchQuery,
+      currentPage,
+      itemsPerPage,
+      sortField,
+      sortDirection,
+      loading,
+      filteredAgents,
+      paginatedAgents,
+      totalPages,
+      paginationInfo,
+      showDetails, 
+      openModal,
+      sort,
+      changePage,
+      changeItemsPerPage
+    }
+  }
+})
+</script>
+
+<template>
+  <div class="p-6">
+    <!-- Header -->
+    <div class="mb-6">
+      <div class="flex flex-col lg:flex-row lg:items-center lg:justify-between gap-4">
+        <div class="flex items-center space-x-4">
+          <h2 class="text-2xl font-semibold text-nadis-black">Pending Agents</h2>
+          <span class="bg-yellow-500 text-white px-3 py-1 rounded-full text-sm font-medium">
+            {{ filteredAgents.length }} Total
+          </span>
+        </div>
+      </div>
+    </div>
+
+    <div class="space-y-6">
+      <!-- Search and Controls -->
+      <div class="flex flex-col sm:flex-row justify-between items-start sm:items-center gap-4">
+      <!-- Search Input -->
+      <div class="relative flex-1 max-w-md">
+        <div class="absolute inset-y-0 left-0 pl-3 flex items-center pointer-events-none">
+          <svg class="h-5 w-5 text-gray-400" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M21 21l-6-6m2-5a7 7 0 11-14 0 7 7 0 0114 0z" />
+          </svg>
+        </div>
+        <input
+          v-model="searchQuery"
+          type="text"
+          placeholder="Search agents..."
+          class="block w-full pl-10 pr-3 py-2 border border-gray-300 rounded-md leading-5 bg-white placeholder-gray-500 focus:outline-none focus:placeholder-gray-400 focus:ring-1 focus:ring-yellow-500 focus:border-yellow-500 sm:text-sm"
+        />
+      </div>
+
+      <!-- Items per page -->
+      <div class="flex items-center space-x-2">
+        <label class="text-sm text-gray-600">Show:</label>
+        <select
+          v-model="itemsPerPage"
+          @change="changeItemsPerPage(itemsPerPage)"
+          class="border border-gray-300 rounded-md px-3 py-1 text-sm focus:outline-none focus:ring-1 focus:ring-yellow-500 focus:border-yellow-500"
+        >
+          <option value="10">10</option>
+          <option value="25">25</option>
+          <option value="50">50</option>
+          <option value="100">100</option>
+        </select>
+      </div>
+    </div>
+
+    <!-- Table -->
+    <div class="bg-white shadow-sm rounded-lg border border-gray-200 overflow-hidden">
+      <!-- Loading State -->
+      <div v-if="loading" class="p-8 text-center">
+        <div class="animate-spin rounded-full h-8 w-8 border-b-2 border-yellow-600 mx-auto"></div>
+        <p class="mt-2 text-gray-600">Loading agents...</p>
+      </div>
+
+      <!-- Table Content -->
+      <div v-else-if="filteredAgents.length > 0" class="overflow-x-auto">
+        <table class="min-w-full divide-y divide-gray-200">
+          <thead class="bg-gray-50">
+            <tr>
+              <th
+                @click="sort('fullname')"
+                class="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider cursor-pointer hover:bg-gray-100 select-none"
+              >
+                <div class="flex items-center space-x-1">
+                  <span>Full Name</span>
+                  <svg
+                    class="w-4 h-4 transition-transform"
+                    :class="{
+                      'text-yellow-600': sortField === 'fullname',
+                      'rotate-180': sortField === 'fullname' && sortDirection === 'desc'
+                    }"
+                    fill="none"
+                    stroke="currentColor"
+                    viewBox="0 0 24 24"
+                  >
+                    <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M5 15l7-7 7 7" />
+                  </svg>
+                </div>
+              </th>
+              <th
+                @click="sort('email')"
+                class="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider cursor-pointer hover:bg-gray-100 select-none"
+              >
+                <div class="flex items-center space-x-1">
+                  <span>Email</span>
+                  <svg
+                    class="w-4 h-4 transition-transform"
+                    :class="{
+                      'text-yellow-600': sortField === 'email',
+                      'rotate-180': sortField === 'email' && sortDirection === 'desc'
+                    }"
+                    fill="none"
+                    stroke="currentColor"
+                    viewBox="0 0 24 24"
+                  >
+                    <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M5 15l7-7 7 7" />
+                  </svg>
+                </div>
+              </th>
+              <th
+                @click="sort('phone')"
+                class="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider cursor-pointer hover:bg-gray-100 select-none"
+              >
+                <div class="flex items-center space-x-1">
+                  <span>Phone</span>
+                  <svg
+                    class="w-4 h-4 transition-transform"
+                    :class="{
+                      'text-yellow-600': sortField === 'phone',
+                      'rotate-180': sortField === 'phone' && sortDirection === 'desc'
+                    }"
+                    fill="none"
+                    stroke="currentColor"
+                    viewBox="0 0 24 24"
+                  >
+                    <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M5 15l7-7 7 7" />
+                  </svg>
+                </div>
+              </th>
+              <th
+                @click="sort('state')"
+                class="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider cursor-pointer hover:bg-gray-100 select-none"
+              >
+                <div class="flex items-center space-x-1">
+                  <span>State</span>
+                  <svg
+                    class="w-4 h-4 transition-transform"
+                    :class="{
+                      'text-yellow-600': sortField === 'state',
+                      'rotate-180': sortField === 'state' && sortDirection === 'desc'
+                    }"
+                    fill="none"
+                    stroke="currentColor"
+                    viewBox="0 0 24 24"
+                  >
+                    <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M5 15l7-7 7 7" />
+                  </svg>
+                </div>
+              </th>
+              <th
+                @click="sort('lga')"
+                class="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider cursor-pointer hover:bg-gray-100 select-none"
+              >
+                <div class="flex items-center space-x-1">
+                  <span>LGA</span>
+                  <svg
+                    class="w-4 h-4 transition-transform"
+                    :class="{
+                      'text-yellow-600': sortField === 'lga',
+                      'rotate-180': sortField === 'lga' && sortDirection === 'desc'
+                    }"
+                    fill="none"
+                    stroke="currentColor"
+                    viewBox="0 0 24 24"
+                  >
+                    <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M5 15l7-7 7 7" />
+                  </svg>
+                </div>
+              </th>
+              <th class="px-6 py-3 text-right text-xs font-medium text-gray-500 uppercase tracking-wider">
+                Actions
+              </th>
+            </tr>
+          </thead>
+          <tbody class="bg-white divide-y divide-gray-200">
+            <tr
+              v-for="agent in paginatedAgents"
+              :key="agent.id"
+              class="hover:bg-gray-50 transition-colors"
+            >
+              <td class="px-6 py-4 whitespace-nowrap">
+                <div class="flex items-center">
+                  <div class="flex-shrink-0 h-10 w-10">
+                    <div class="h-10 w-10 rounded-full bg-yellow-100 border-2 border-yellow-500 flex items-center justify-center">
+                      <span class="text-sm font-medium text-yellow-700">
+                        {{ agent.details.fullname ? agent.details.fullname.charAt(0).toUpperCase() : 'A' }}
+                      </span>
+                    </div>
+                  </div>
+                  <div class="ml-4">
+                    <div class="text-sm font-medium text-gray-900">
+                      {{ agent.details.fullname || 'N/A' }}
+                    </div>
+                    <div class="text-sm text-gray-500">
+                      Pending Approval
+                    </div>
+                  </div>
+                </div>
+              </td>
+              <td class="px-6 py-4 whitespace-nowrap">
+                <div class="text-sm text-gray-900">{{ agent.details.email || 'N/A' }}</div>
+              </td>
+              <td class="px-6 py-4 whitespace-nowrap">
+                <div class="text-sm text-gray-900">{{ agent.details.phoneNumber || 'N/A' }}</div>
+              </td>
+              <td class="px-6 py-4 whitespace-nowrap">
+                <div class="text-sm text-gray-900">{{ agent.stateLga.state || 'N/A' }}</div>
+              </td>
+              <td class="px-6 py-4 whitespace-nowrap">
+                <div class="text-sm text-gray-900">{{ agent.stateLga.lga || 'N/A' }}</div>
+              </td>
+              <td class="px-6 py-4 whitespace-nowrap text-right text-sm font-medium">
+                <button
+                  @click="showDetails(agent)"
+                  class="inline-flex items-center px-3 py-1 border border-transparent text-xs font-medium rounded-md text-yellow-700 bg-yellow-100 hover:bg-yellow-200 focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-yellow-500 transition-colors"
+                >
+                  View Details
+                </button>
+              </td>
+            </tr>
+          </tbody>
+        </table>
+      </div>
+
+      <!-- Empty State -->
+      <div v-else class="text-center py-12">
+        <svg class="mx-auto h-12 w-12 text-gray-400" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+          <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M17 20h5v-2a3 3 0 00-5.356-1.857M17 20H7m10 0v-2c0-.656-.126-1.283-.356-1.857M7 20H2v-2a3 3 0 015.356-1.857M7 20v-2c0-.656.126-1.283.356-1.857m0 0a5.002 5.002 0 019.288 0M15 7a3 3 0 11-6 0 3 3 0 016 0zm6 3a2 2 0 11-4 0 2 2 0 014 0zM7 10a2 2 0 11-4 0 2 2 0 014 0z" />
+        </svg>
+        <h3 class="mt-2 text-sm font-medium text-gray-900">No pending agents found</h3>
+        <p class="mt-1 text-sm text-gray-500">
+          {{ searchQuery ? 'Try adjusting your search criteria.' : 'All agents have been processed or no agents are currently pending approval.' }}
+        </p>
+      </div>
+    </div>
+
+    <!-- Pagination -->
+    <div v-if="filteredAgents.length > 0" class="bg-white px-4 py-3 flex items-center justify-between border-t border-gray-200 sm:px-6 rounded-lg shadow-sm border border-gray-200">
+      <div class="flex-1 flex justify-between sm:hidden">
+        <button
+          @click="changePage(currentPage - 1)"
+          :disabled="currentPage === 1"
+          class="relative inline-flex items-center px-4 py-2 border border-gray-300 text-sm font-medium rounded-md text-gray-700 bg-white hover:bg-gray-50 disabled:opacity-50 disabled:cursor-not-allowed"
+        >
+          Previous
+        </button>
+        <button
+          @click="changePage(currentPage + 1)"
+          :disabled="currentPage === totalPages"
+          class="ml-3 relative inline-flex items-center px-4 py-2 border border-gray-300 text-sm font-medium rounded-md text-gray-700 bg-white hover:bg-gray-50 disabled:opacity-50 disabled:cursor-not-allowed"
+        >
+          Next
+        </button>
+      </div>
+      <div class="hidden sm:flex-1 sm:flex sm:items-center sm:justify-between">
+        <div>
+          <p class="text-sm text-gray-700">
+            Showing
+            <span class="font-medium">{{ paginationInfo.start }}</span>
+            to
+            <span class="font-medium">{{ paginationInfo.end }}</span>
+            of
+            <span class="font-medium">{{ paginationInfo.total }}</span>
+            results
+          </p>
+        </div>
+        <div>
+          <nav class="relative z-0 inline-flex rounded-md shadow-sm -space-x-px" aria-label="Pagination">
+            <button
+              @click="changePage(currentPage - 1)"
+              :disabled="currentPage === 1"
+              class="relative inline-flex items-center px-2 py-2 rounded-l-md border border-gray-300 bg-white text-sm font-medium text-gray-500 hover:bg-gray-50 disabled:opacity-50 disabled:cursor-not-allowed"
+            >
+              <span class="sr-only">Previous</span>
+              <svg class="h-5 w-5" fill="currentColor" viewBox="0 0 20 20">
+                <path fill-rule="evenodd" d="M12.707 5.293a1 1 0 010 1.414L9.414 10l3.293 3.293a1 1 0 01-1.414 1.414l-4-4a1 1 0 010-1.414l4-4a1 1 0 011.414 0z" clip-rule="evenodd" />
+              </svg>
+            </button>
+            
+            <!-- Page Numbers -->
+            <template v-for="page in Math.min(totalPages, 7)" :key="page">
+              <button
+                v-if="page === 1 || page === totalPages || (page >= currentPage - 2 && page <= currentPage + 2)"
+                @click="changePage(page)"
+                :class="[
+                  page === currentPage
+                    ? 'z-10 bg-yellow-50 border-yellow-500 text-yellow-600'
+                    : 'bg-white border-gray-300 text-gray-500 hover:bg-gray-50',
+                  'relative inline-flex items-center px-4 py-2 border text-sm font-medium'
+                ]"
+              >
+                {{ page }}
+              </button>
+              <span
+                v-else-if="(page === 2 && currentPage > 4) || (page === totalPages - 1 && currentPage < totalPages - 3)"
+                class="relative inline-flex items-center px-4 py-2 border border-gray-300 bg-white text-sm font-medium text-gray-700"
+              >
+                ...
+              </span>
+            </template>
+
+            <button
+              @click="changePage(currentPage + 1)"
+              :disabled="currentPage === totalPages"
+              class="relative inline-flex items-center px-2 py-2 rounded-r-md border border-gray-300 bg-white text-sm font-medium text-gray-500 hover:bg-gray-50 disabled:opacity-50 disabled:cursor-not-allowed"
+            >
+              <span class="sr-only">Next</span>
+              <svg class="h-5 w-5" fill="currentColor" viewBox="0 0 20 20">
+                <path fill-rule="evenodd" d="M7.293 14.707a1 1 0 010-1.414L10.586 10 7.293 6.707a1 1 0 011.414-1.414l4 4a1 1 0 010 1.414l-4 4a1 1 0 01-1.414 0z" clip-rule="evenodd" />
+              </svg>
+            </button>
+          </nav>
+        </div>
+      </div>
+    </div>
+
+    <!-- Agent Details Modal -->
+    <PendingDetails :show="show" :agent="agent" @close="openModal" />
+    </div>
+  </div>
+</template>
