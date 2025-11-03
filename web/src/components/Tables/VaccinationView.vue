@@ -3,6 +3,7 @@ import { useVaccination } from './../../stores/vaccination'
 import { computed, defineComponent, onMounted, ref, toRefs, watch } from 'vue'
 import VaccinationDeclineForm from './DeclineForm/VaccinationDeclineForm.vue'
 import useMonths from './../../composables/months'
+import { useToast } from './../../composables/toast'
 import { utils, writeFile } from 'xlsx'
 
 export default defineComponent({
@@ -24,6 +25,7 @@ export default defineComponent({
     const value = ref([]) as any
     const doc_id = ref('')
     const decline_form = ref(false)
+    const { success, error, warning } = useToast()
 
     const reporter_state = computed(() => useVaccination().reporter_state)
     const vaccination = computed(() => useVaccination().vaccination) as any
@@ -123,19 +125,136 @@ export default defineComponent({
     const closeModal = () => {
       decline_form.value = false
     }
-    const exportTableToExcel = () => {
-      // Acquire Data (reference to the HTML table)
-      var table_elt = document.getElementById('vaccination_to_excel')
+    const exportTableToExcel = async () => {
+      try {
+        // Get export filters from global state (set by ReportsPage)
+        const exportFilters = (window as any).exportFilters || {}
+        
+        // Prepare filters for the export method
+        const filters = {
+          category: selected_category.value === 'Approved',
+          state: selected_state.value || 'All States',
+          in_progress: selected_category.value === 'In Progress',
+          startDate: exportFilters.startDate,
+          endDate: exportFilters.endDate
+        }
 
-      // Extract Data (create a workbook object from the table)
-      var workbook = utils.table_to_book(table_elt)
+        // Fetch filtered data from store (no pagination limits)
+        const exportData = await useVaccination().exportVaccination(filters)
+        
+        if (exportData.length === 0) {
+          warning('No vaccination reports found matching your selected filters. Try adjusting your date range or filters.')
+          return
+        }
 
-      // Process Data (add a new row)
-      var ws = workbook.Sheets['Sheet1']
-      utils.sheet_add_aoa(ws, [], { origin: -1 })
+        // Prepare headers
+        const headers = [
+          'Date Reported',
+          'State',
+          'LGA',
+          'Species',
+          'Vaccine Name',
+          'Number Vaccinated',
+          'Status',
+          'Reporter'
+        ]
 
-      // Package and Release Data (`writeFile` tries to write and save an XLSB file)
-      writeFile(workbook, selected_category.value + '_Vaccination_report_' + Date.now() + '.xlsx')
+        // Prepare data rows
+        const rows = exportData.map((item: any) => {
+          const reporterState = findState(item.doc_id)
+          return [
+            getDate(item.created_at),
+            reporterState?.state || item.state || 'N/A',
+            reporterState?.local_govt || 'N/A',
+            item.species || 'N/A',
+            item.vaccine_name || 'N/A',
+            item.no_vaccinated || 0,
+            item.approved ? 'Approved' : (item.finished ? 'Pending' : 'In Progress'),
+            item.reporter_name || 'N/A'
+          ]
+        })
+
+        // Combine headers and data
+        const worksheetData = [headers, ...rows]
+        
+        // Generate base filename
+        let baseFilename = `${selected_category.value || 'All'}_Vaccination_Reports`
+        if (exportFilters.startDate || exportFilters.endDate) {
+          baseFilename += '_Filtered'
+        }
+        baseFilename += `_${Date.now()}`
+
+        // Export based on selected format
+        const format = exportFilters.format || 'excel'
+        
+        if (format === 'csv') {
+          // Create CSV content
+          const csvContent = worksheetData.map(row => 
+            row.map(cell => `"${String(cell).replace(/"/g, '""')}"`).join(',')
+          ).join('\n')
+          
+          // Create and download CSV
+          const blob = new Blob([csvContent], { type: 'text/csv;charset=utf-8;' })
+          const link = document.createElement('a')
+          link.href = URL.createObjectURL(blob)
+          link.download = `${baseFilename}.csv`
+          link.click()
+          URL.revokeObjectURL(link.href)
+        } else if (format === 'pdf') {
+          // Create HTML content for PDF printing
+          const htmlContent = `
+            <html>
+              <head>
+                <title>Vaccination Reports</title>
+                <style>
+                  body { font-family: Arial, sans-serif; margin: 20px; }
+                  table { width: 100%; border-collapse: collapse; margin-top: 20px; }
+                  th, td { border: 1px solid #ddd; padding: 8px; text-align: left; font-size: 12px; }
+                  th { background-color: #f2f2f2; font-weight: bold; }
+                  .header { margin-bottom: 20px; }
+                  @media print { body { margin: 0; } }
+                </style>
+              </head>
+              <body>
+                <div class="header">
+                  <h2>Vaccination Reports - ${selected_category.value || 'All'}</h2>
+                  <p>Generated on: ${new Date().toLocaleString()}</p>
+                  ${exportFilters.startDate || exportFilters.endDate ? 
+                    `<p>Date Range: ${exportFilters.startDate || 'No start'} to ${exportFilters.endDate || 'No end'}</p>` : 
+                    '<p>Date Range: All dates</p>'
+                  }
+                  <p>Total Records: ${exportData.length}</p>
+                </div>
+                <table>
+                  ${worksheetData.map((row, index) => 
+                    `<tr>${row.map(cell => 
+                      index === 0 ? `<th>${cell}</th>` : `<td>${cell}</td>`
+                    ).join('')}</tr>`
+                  ).join('')}
+                </table>
+              </body>
+            </html>
+          `
+          
+          const printWindow = window.open('', '_blank')
+          if (printWindow) {
+            printWindow.document.write(htmlContent)
+            printWindow.document.close()
+            printWindow.print()
+          }
+        } else {
+          // Default to Excel format
+          const workbook = utils.book_new()
+          const worksheet = utils.aoa_to_sheet(worksheetData)
+          utils.book_append_sheet(workbook, worksheet, 'Vaccination Reports')
+          writeFile(workbook, `${baseFilename}.xlsx`)
+        }
+        
+        success(`Successfully exported ${exportData.length} vaccination reports to ${format === 'csv' ? 'CSV' : format === 'pdf' ? 'PDF' : 'Excel'}.`)
+      } catch (exportError) {
+        console.error('Error exporting vaccination data:', exportError)
+        error('Failed to export vaccination reports. Please try again or contact support if the issue persists.')
+      }
     }
     const findState = (id: string) => {
       const found_reporter = reporter_state.value.find((reporter: any) => reporter.doc_id === id)

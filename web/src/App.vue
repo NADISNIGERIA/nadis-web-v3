@@ -3,6 +3,7 @@ import { RouterView } from 'vue-router'
 import SideBar from './components/SideBar.vue'
 import MenuIcon from './components/icons/MenuIcon.vue'
 import SearchBar from './components/SearchBar.vue'
+import ToastContainer from './components/ToastContainer.vue'
 import { computed, onMounted, ref, watch } from 'vue'
 import { useMiddleware } from './stores/middleware'
 import { useAdmin } from './stores/admin'
@@ -108,6 +109,9 @@ onMounted(() => {
       <router-view v-on:active-menu="activeMenu" :full="full"></router-view>
     </div>
   </div>
+  
+  <!-- Toast Container -->
+  <ToastContainer />
 </template>
 
 <style>

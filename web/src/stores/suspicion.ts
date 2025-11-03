@@ -280,6 +280,131 @@ export const useSuspicion = defineStore('suspicion', {
           doc_id: payload.doc_id
         })
       }
+    },
+
+    // Export method with date filtering and no pagination limit
+    async exportSuspicion(filters: {
+      category: boolean,
+      state: string,
+      in_progress: boolean,
+      startDate?: string,
+      endDate?: string
+    }) {
+      try {
+        this.loading = true
+        const state = filters.state
+        let sort = false
+
+        if (filters.in_progress === true) {
+          // Handle in-progress exports
+          let queryRef: any
+          if (state !== 'All States') {
+            queryRef = query(
+              collection(fb.db, 'suspicion_reports'),
+              where('state', '==', state),
+              where('finished', '==', false)
+            )
+          } else {
+            queryRef = query(
+              collection(fb.db, 'suspicion_reports'),
+              where('finished', '==', false)
+            )
+          }
+
+          // Add date filtering if provided
+          if (filters.startDate || filters.endDate) {
+            const constraints = []
+            if (filters.startDate) {
+              const startTimestamp = new Date(filters.startDate).getTime()
+              constraints.push(where('created_at', '>=', startTimestamp))
+            }
+            if (filters.endDate) {
+              // Add 24 hours to include the entire end date
+              const endTimestamp = new Date(filters.endDate).getTime() + (24 * 60 * 60 * 1000)
+              constraints.push(where('created_at', '<=', endTimestamp))
+            }
+            
+            // Rebuild query with date constraints
+            if (state !== 'All States') {
+              queryRef = query(
+                collection(fb.db, 'suspicion_reports'),
+                where('state', '==', state),
+                where('finished', '==', false),
+                ...constraints
+              )
+            } else {
+              queryRef = query(
+                collection(fb.db, 'suspicion_reports'),
+                where('finished', '==', false),
+                ...constraints
+              )
+            }
+          }
+
+          const docs = await getDocs(queryRef)
+          const value = []
+          docs.forEach((doc) => {
+            const unit = doc.data()
+            unit.doc_id = doc.id
+            value.push(unit)
+          })
+
+          // Sort by created_at descending
+          value.sort((a: any, b: any) => b.created_at - a.created_at)
+          return value
+
+        } else {
+          // Handle approved/pending exports
+          if (filters.category) {
+            sort = true
+          } else {
+            sort = false
+          }
+
+          let queryRef: any
+          const constraints = [
+            where('approved', '==', sort),
+            where('finished', '==', true)
+          ]
+
+          // Add state filter if not 'All States'
+          if (state !== 'All States') {
+            constraints.push(where('state', '==', state))
+          }
+
+          // Add date filtering if provided
+          if (filters.startDate || filters.endDate) {
+            if (filters.startDate) {
+              const startTimestamp = new Date(filters.startDate).getTime()
+              constraints.push(where('created_at', '>=', startTimestamp))
+            }
+            if (filters.endDate) {
+              // Add 24 hours to include the entire end date
+              const endTimestamp = new Date(filters.endDate).getTime() + (24 * 60 * 60 * 1000)
+              constraints.push(where('created_at', '<=', endTimestamp))
+            }
+          }
+
+          queryRef = query(collection(fb.db, 'suspicion_reports'), ...constraints)
+          
+          const docs = await getDocs(queryRef)
+          const value = []
+          docs.forEach((doc) => {
+            const unit = doc.data()
+            unit.doc_id = doc.id
+            value.push(unit)
+          })
+
+          // Sort by created_at descending
+          value.sort((a: any, b: any) => b.created_at - a.created_at)
+          return value
+        }
+      } catch (error) {
+        console.error('Error exporting suspicion reports:', error)
+        return []
+      } finally {
+        this.loading = false
+      }
     }
   }
 })
