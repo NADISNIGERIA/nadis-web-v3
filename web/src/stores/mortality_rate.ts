@@ -75,6 +75,102 @@ export const useMortalityRate = defineStore('mortality_rate', {
         }
       })
       this.aquaculture_mortality = value
+    },
+    
+    // State-filtered mortality methods
+    async outbreakMortalityFiltered(state?: string) {
+      const date = new Date()
+      const month = new Date().getMonth()
+      const last_six_months = date.setMonth(month - 6)
+      
+      // Query without state filter to avoid composite index requirement
+      const mortalityQuery = query(
+        collection(fb.db, 'outbreak_reports'), 
+        where('created_at', '>', last_six_months)
+      )
+      
+      const docs = await getDocs(mortalityQuery)
+      const value = [] as any
+      
+      docs.forEach((doc) => {
+        const data = doc.data()
+        // Filter by state in client-side code if needed
+        const matchesState = !state || state === 'All States' || data.state === state
+        
+        if (data.approved == true && matchesState) {
+          if (data.number_of_animals != undefined) {
+            if (data.number_of_animals.deaths != '') {
+              value.push(data)
+            }
+          }
+        }
+      })
+      
+      this.outbreak_mortality = value
+    },
+    
+    async suspicionMortalityFiltered(state?: string) {
+      this.suspicion_mortality = []
+      const date = new Date()
+      const month = new Date().getMonth()
+      const last_six_months = date.setMonth(month - 6)
+      
+      // Query without state filter to avoid composite index requirement
+      const mortalityQuery = query(
+        collection(fb.db, 'suspicion_reports'), 
+        where('created_at', '>', last_six_months)
+      )
+      
+      const docs = await getDocs(mortalityQuery)
+      const value = [] as any
+      
+      docs.forEach((doc) => {
+        const data = doc.data()
+        // Filter by state in client-side code if needed
+        const matchesState = !state || state === 'All States' || data.state === state
+        
+        if (data.approved == true && matchesState) {
+          if (data.total_number_of_animals != undefined) {
+            if (data.total_number_of_animals.dead_animals != '') {
+              value.push(data)
+            }
+          }
+        }
+      })
+      
+      this.suspicion_mortality = value
+    },
+    
+    async aquacultureMortalityFiltered(state?: string) {
+      this.aquaculture_mortality = []
+      const date = new Date()
+      const month = new Date().getMonth()
+      const last_six_months = date.setMonth(month - 6)
+      
+      // Query without state filter to avoid composite index requirement
+      const mortalityQuery = query(
+        collection(fb.db, 'aquaculture_reports'), 
+        where('created_at', '>', last_six_months)
+      )
+      
+      const docs = await getDocs(mortalityQuery)
+      const value = [] as any
+      
+      docs.forEach((doc) => {
+        const data = doc.data()
+        // Filter by state in client-side code if needed
+        const matchesState = !state || state === 'All States' || data.state === state
+        
+        if (data.approved == true && matchesState) {
+          if (data.passive_surveillance != undefined) {
+            if (data.passive_surveillance.mortality_for_month != '') {
+              value.push(data)
+            }
+          }
+        }
+      })
+      
+      this.aquaculture_mortality = value
     }
   },
   getters: {
