@@ -27,6 +27,7 @@ import { useAquaculture } from '../stores/aquaculture'
 import { useRoute } from 'vue-router'
 import ReportStatsService, { ReportType } from '../services/reportStatsService'
 import { useReportStatsUpdates } from '../services/reportStatsEventBus'
+import DateRangePicker from '../components/inputs/DateRangePicker.vue'
 
 export default defineComponent({
   components: {
@@ -40,7 +41,8 @@ export default defineComponent({
     DropArrowIcon,
     ExportIcon,
     LaboratoryView,
-    AquacultureView
+    AquacultureView,
+    DateRangePicker
   },
   props: {
     full: Boolean
@@ -1046,6 +1048,12 @@ export default defineComponent({
     const aquaculture = computed(() => activeReportType.value === ReportType.AQUACULTURE)
     const export_to_excel = ref(1)
     
+    // Date range state for filtering and export
+    const selectedStartDate = ref<string | null>(null)
+    const selectedEndDate = ref<string | null>(null)
+    const showExportModal = ref(false)
+    const selectedExportFormat = ref<'excel' | 'csv' | 'pdf'>('excel')
+    
     // Loading and error states
     const isLoading = ref(false)
     const error = ref<string | null>(null)
@@ -1100,13 +1108,30 @@ export default defineComponent({
     const admin = computed(() => useAdmin().admin) as any
     const route = useRoute()
 
-    // Initialize report type from URL query parameter
+    // Initialize report type and date filters from URL query parameters
     const initializeFromURL = () => {
       const urlReportType = route.query.type as string
       const validReportType = Object.values(ReportType).find(type => type === urlReportType)
       if (validReportType) {
         activeReportType.value = validReportType as ReportType
       }
+      
+      // Restore date filters from URL
+      const urlStartDate = route.query.startDate as string
+      const urlEndDate = route.query.endDate as string
+      
+      if (urlStartDate && isValidDate(urlStartDate)) {
+        selectedStartDate.value = urlStartDate
+      }
+      if (urlEndDate && isValidDate(urlEndDate)) {
+        selectedEndDate.value = urlEndDate
+      }
+    }
+
+    // Helper function to validate date strings
+    const isValidDate = (dateString: string): boolean => {
+      const date = new Date(dateString)
+      return date instanceof Date && !isNaN(date.getTime()) && dateString.match(/^\d{4}-\d{2}-\d{2}$/)
     }
 
     watch(role, () => {
@@ -1143,10 +1168,15 @@ export default defineComponent({
         error.value = null
         useUnsubscriber().unsubscribeAllSnapshot()
         
-        // Update URL to reflect current selection
-        router.replace({ 
-          query: { ...route.query, type: reportType } 
-        }).catch(() => {}) // Ignore navigation errors
+        // Update URL to reflect current selection (preserve date filters in URL)
+        const newQuery = { 
+          ...route.query, 
+          type: reportType,
+          startDate: selectedStartDate.value || undefined,
+          endDate: selectedEndDate.value || undefined
+        }
+        
+        router.replace({ query: newQuery }).catch(() => {}) // Ignore navigation errors
         
         activeReportType.value = reportType
         
@@ -1201,14 +1231,61 @@ export default defineComponent({
       }
     }
 
-    // Debounced export function to prevent rapid clicks
-    let exportTimeout: NodeJS.Timeout | null = null
+    // Date range handling
+    const handleDateRangeChange = ({ startDate, endDate }: { startDate: string | null; endDate: string | null }) => {
+      selectedStartDate.value = startDate
+      selectedEndDate.value = endDate
+      
+      // Update URL to persist date filters across report type switches
+      const newQuery = { 
+        ...route.query, 
+        startDate: startDate || undefined,
+        endDate: endDate || undefined
+      }
+      
+      router.replace({ query: newQuery }).catch(() => {})
+    }
+
+    const openExportModal = () => {
+      showExportModal.value = true
+    }
+
+    const closeExportModal = () => {
+      showExportModal.value = false
+    }
+
+    const clearDateRange = () => {
+      selectedStartDate.value = null
+      selectedEndDate.value = null
+    }
+
+    // Export functions
     const exportToExcel = () => {
+      openExportModal()
+    }
+
+    // Actual export function called from modal
+    let exportTimeout: NodeJS.Timeout | null = null
+    const performExport = () => {
       if (exportTimeout) {
         clearTimeout(exportTimeout)
       }
       exportTimeout = setTimeout(() => {
+        // Pass date range and format to export functionality
+        const exportData = {
+          startDate: selectedStartDate.value,
+          endDate: selectedEndDate.value,
+          reportType: activeReportType.value,
+          state: selected_state.value,
+          category: selected_category.value,
+          format: selectedExportFormat.value
+        }
+        
+        // Store export data for table components to access
+        window.exportFilters = exportData
+        
         export_to_excel.value++
+        closeExportModal()
         exportTimeout = null
       }, 300)
     }
@@ -1289,6 +1366,10 @@ export default defineComponent({
       isLoading,
       error,
       reportStats,
+      selectedStartDate,
+      selectedEndDate,
+      showExportModal,
+      selectedExportFormat,
       
       // Configuration
       reportTypeConfig,
@@ -1306,7 +1387,13 @@ export default defineComponent({
       selectLaboratory,
       selectAquaculture,
       exportToExcel,
-      fetchReportStats
+      fetchReportStats,
+      handleDateRangeChange,
+      openExportModal,
+      closeExportModal,
+      clearDateRange,
+      performExport,
+      isValidDate
     }
   }
 })
@@ -1486,6 +1573,147 @@ export default defineComponent({
           <a href="javascript:;" class="">Export</a>
           <div class="inline-block sm:pl-2 pl-1">
             <export-icon></export-icon>
+          </div>
+        </div>
+      </div>
+    </div>
+    
+    <!-- Export Modal with Date Range -->
+    <div v-if="showExportModal" class="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50">
+      <div class="bg-white rounded-lg shadow-xl max-w-2xl w-full mx-4 max-h-[90vh] overflow-y-auto">
+        <div class="p-6">
+          <div class="flex items-center justify-between mb-6">
+            <h3 class="text-xl font-semibold text-gray-900">Export Reports</h3>
+            <button
+              @click="closeExportModal"
+              class="text-gray-400 hover:text-gray-600 text-2xl font-bold"
+            >
+              ×
+            </button>
+          </div>
+          
+          <div class="mb-6">
+            <h4 class="text-lg font-medium text-gray-800 mb-2">Current Filters</h4>
+            <div class="bg-gray-50 p-4 rounded-md">
+              <div class="grid grid-cols-1 sm:grid-cols-2 gap-3 text-sm">
+                <div>
+                  <span class="font-medium text-gray-600">Report Type:</span>
+                  <span class="ml-2 text-gray-800">{{ reportTypeConfig.find(config => config.key === activeReportType)?.label || 'Unknown' }}</span>
+                </div>
+                <div>
+                  <span class="font-medium text-gray-600">State:</span>
+                  <span class="ml-2 text-gray-800">{{ selected_state }}</span>
+                </div>
+                <div>
+                  <span class="font-medium text-gray-600">Status:</span>
+                  <span class="ml-2 text-gray-800">{{ selected_category }}</span>
+                </div>
+              </div>
+            </div>
+          </div>
+
+          <div class="mb-6">
+            <h4 class="text-lg font-medium text-gray-800 mb-3">Export Format</h4>
+            <div class="grid grid-cols-3 gap-3 mb-6">
+              <label class="flex items-center p-3 border rounded-lg cursor-pointer hover:bg-gray-50" 
+                     :class="{'border-primary bg-primary bg-opacity-5': selectedExportFormat === 'excel'}">
+                <input type="radio" v-model="selectedExportFormat" value="excel" class="hidden">
+                <div class="flex items-center">
+                  <div class="w-8 h-8 bg-green-100 rounded flex items-center justify-center mr-3">
+                    <svg class="w-5 h-5 text-green-600" fill="currentColor" viewBox="0 0 24 24">
+                      <path d="M14,2H6A2,2 0 0,0 4,4V20A2,2 0 0,0 6,22H18A2,2 0 0,0 20,20V8L14,2M18,20H6V4H13V9H18V20Z"/>
+                    </svg>
+                  </div>
+                  <div>
+                    <div class="font-medium">Excel</div>
+                    <div class="text-xs text-gray-500">.xlsx</div>
+                  </div>
+                </div>
+              </label>
+              
+              <label class="flex items-center p-3 border rounded-lg cursor-pointer hover:bg-gray-50"
+                     :class="{'border-primary bg-primary bg-opacity-5': selectedExportFormat === 'csv'}">
+                <input type="radio" v-model="selectedExportFormat" value="csv" class="hidden">
+                <div class="flex items-center">
+                  <div class="w-8 h-8 bg-blue-100 rounded flex items-center justify-center mr-3">
+                    <svg class="w-5 h-5 text-blue-600" fill="currentColor" viewBox="0 0 24 24">
+                      <path d="M14,2H6A2,2 0 0,0 4,4V20A2,2 0 0,0 6,22H18A2,2 0 0,0 20,20V8L14,2M18,20H6V4H13V9H18V20Z"/>
+                    </svg>
+                  </div>
+                  <div>
+                    <div class="font-medium">CSV</div>
+                    <div class="text-xs text-gray-500">.csv</div>
+                  </div>
+                </div>
+              </label>
+              
+              <label class="flex items-center p-3 border rounded-lg cursor-pointer hover:bg-gray-50"
+                     :class="{'border-primary bg-primary bg-opacity-5': selectedExportFormat === 'pdf'}">
+                <input type="radio" v-model="selectedExportFormat" value="pdf" class="hidden">
+                <div class="flex items-center">
+                  <div class="w-8 h-8 bg-red-100 rounded flex items-center justify-center mr-3">
+                    <svg class="w-5 h-5 text-red-600" fill="currentColor" viewBox="0 0 24 24">
+                      <path d="M14,2H6A2,2 0 0,0 4,4V20A2,2 0 0,0 6,22H18A2,2 0 0,0 20,20V8L14,2M18,20H6V4H13V9H18V20Z"/>
+                    </svg>
+                  </div>
+                  <div>
+                    <div class="font-medium">PDF</div>
+                    <div class="text-xs text-gray-500">.pdf</div>
+                  </div>
+                </div>
+              </label>
+            </div>
+          </div>
+
+          <div class="mb-6">
+            <h4 class="text-lg font-medium text-gray-800 mb-3">Date Range (Optional)</h4>
+            <p class="text-sm text-gray-600 mb-4">Select a date range to filter the export, or leave empty to export all records.</p>
+            
+            <date-range-picker
+              v-model:startDate="selectedStartDate"
+              v-model:endDate="selectedEndDate"
+              @rangeChanged="handleDateRangeChange"
+            />
+            
+            <div v-if="selectedStartDate || selectedEndDate" class="mt-4 p-3 bg-blue-50 rounded-md">
+              <p class="text-sm text-blue-700">
+                <strong>Selected Range:</strong>
+                <span v-if="selectedStartDate && selectedEndDate">
+                  {{ new Date(selectedStartDate).toLocaleDateString() }} - {{ new Date(selectedEndDate).toLocaleDateString() }}
+                </span>
+                <span v-else-if="selectedStartDate">
+                  From {{ new Date(selectedStartDate).toLocaleDateString() }}
+                </span>
+                <span v-else-if="selectedEndDate">
+                  Until {{ new Date(selectedEndDate).toLocaleDateString() }}
+                </span>
+              </p>
+            </div>
+          </div>
+
+          <div class="flex items-center justify-between pt-4 border-t border-gray-200">
+            <button
+              @click="clearDateRange"
+              class="px-4 py-2 text-sm text-gray-600 hover:text-gray-800"
+            >
+              Clear Date Range
+            </button>
+            
+            <div class="flex space-x-3">
+              <button
+                @click="closeExportModal"
+                class="px-4 py-2 border border-gray-300 rounded-md text-sm font-medium text-gray-700 hover:bg-gray-50"
+              >
+                Cancel
+              </button>
+              <button
+                @click="performExport"
+                class="px-6 py-2 bg-primary hover:bg-primary-2 text-white rounded-md text-sm font-medium flex items-center"
+              >
+                <export-icon class="mr-2"></export-icon>
+                Export to {{ selectedExportFormat.toUpperCase() }}
+              </button>
+            </div>
           </div>
         </div>
       </div>
