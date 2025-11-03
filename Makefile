@@ -28,6 +28,12 @@ all:
 build: 
 	docker compose -f ${COMPOSE_FILE} build
 
+build-prod: ## Build production version and output to dist folder
+	@echo "Building production version..."
+	@docker compose exec nadis-web npm ci
+	@docker compose exec nadis-web npm run build-only
+	@echo "Production build completed. Files are in web/dist/"
+
 run: # Run RETAIL engine in a container
 	@docker compose up -d nadis-web
 
@@ -58,5 +64,5 @@ ps: all ## view current running containers
 	@docker compose -f ${COMPOSE_FILE_DEV} ps
 
 
-.PHONY:  build run test stop logs shell down clean ps migrate load-data create-wallets setup
+.PHONY:  build build-prod run test stop logs shell down clean ps migrate load-data create-wallets setup
 .EXPORT_ALL_VARIABLES:
