@@ -58,18 +58,18 @@ export default defineComponent({
     <div class="absolute bottom-0 left-0 w-full h-32 bg-gradient-to-t from-nadis-black to-transparent opacity-50"></div>
     <div class="absolute top-0 right-0 w-32 h-32 bg-gradient-to-bl from-white to-transparent opacity-10 rounded-bl-full"></div>
     
-    <div class="pl-6 lg:pl-9 pt-6 lg:pt-9 relative z-10">
+    <div class="px-8 lg:px-12 pt-6 lg:pt-9 relative z-10">
       <div class="flex items-center justify-between">
         <!-- Modern Logo with Nigeria Coat of Arms -->
-        <div class="flex items-center space-x-3">
+        <div class="flex items-center space-x-4 min-w-0 flex-1 pr-6 lg:pr-8">
           <!-- Nigeria Coat of Arms -->
-          <div class="w-12 h-12 lg:w-14 lg:h-14 bg-white bg-opacity-20 lg:bg-white rounded-xl flex items-center justify-center backdrop-blur-sm p-2">
+          <div class="w-12 h-12 lg:w-14 lg:h-14 bg-white bg-opacity-20 lg:bg-white rounded-xl flex items-center justify-center backdrop-blur-sm p-2 flex-shrink-0">
             <img src="/img/coat_of_arms.svg" alt="Nigeria Coat of Arms" class="w-full h-full object-contain" />
           </div>
           <!-- Text -->
-          <div class="flex flex-col">
+          <div class="flex flex-col min-w-0 flex-1">
             <h1 class="text-xl lg:text-2xl font-bold text-white tracking-tight">NADIS</h1>
-            <p class="text-xs text-white text-opacity-80 font-medium tracking-wide hidden lg:block">
+            <p class="text-xs text-white text-opacity-80 font-medium tracking-wide hidden lg:block leading-relaxed pr-2">
               Nigeria Animal Disease Info System
             </p>
           </div>
