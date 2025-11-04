@@ -3,11 +3,13 @@ import { computed, defineComponent, onMounted, ref, toRefs, watch } from 'vue'
 import useMonths from './../../composables/months'
 import { useAquaculture } from './../../stores/aquaculture'
 import AquacultureDeclineForm from './DeclineForm/AquacultureDeclineForm.vue'
+import BulkEditModal from './../BulkEditModal.vue'
+import { useBulkEdit } from './../../composables/useBulkEdit'
 import { useToast } from './../../composables/toast'
 import { utils, writeFile } from 'xlsx'
 
 export default defineComponent({
-  components: { AquacultureDeclineForm },
+  components: { AquacultureDeclineForm, BulkEditModal },
   props: {
     export_to_excel: Number,
     selected_category: String,
@@ -254,6 +256,18 @@ export default defineComponent({
       }
     }
 
+    // Initialize bulk edit composable AFTER all function declarations
+    const {
+      selectedReports,
+      selectAll,
+      showBulkEditModal,
+      toggleReportSelection,
+      toggleSelectAll,
+      openBulkEditModal,
+      closeBulkEditModal,
+      handleBulkEditConfirm
+    } = useBulkEdit(aquaculture, useAquaculture(), getAqauculture)
+
     onMounted(() => {
       getAqauculture()
     })
@@ -266,7 +280,15 @@ export default defineComponent({
       closeModal,
       getDate,
       findState,
-      fixLocation
+      fixLocation,
+      selectedReports,
+      selectAll,
+      showBulkEditModal,
+      toggleReportSelection,
+      toggleSelectAll,
+      openBulkEditModal,
+      closeBulkEditModal,
+      handleBulkEditConfirm
     }
   }
 })
@@ -274,11 +296,31 @@ export default defineComponent({
 
 <template>
   <div>
+    <div class="mb-4">
+      <button
+        v-if="selectedReports.size > 0"
+        @click="openBulkEditModal"
+        class="px-4 py-2 bg-blue-600 text-white rounded hover:bg-blue-700 transition-colors"
+      >
+        Bulk Edit Status ({{ selectedReports.size }} selected)
+      </button>
+    </div>
     <div class="w-full overflow-x-auto">
       <table class="w-7000 mb-10" id="aquaculture_to_excel">
-        <tr class="grid mt-8 mb-1 text-cool-gray-500 text-sm grid-cols-80">
+        <tr class="grid mt-8 mb-1 text-cool-gray-500 text-sm grid-cols-82">
+          <th class="col-span-2 bg-card-8 rounded-tl-md border-r border-cool-gray-200 px-3 py-3 shadow-md">
+            <div class="flex flex-col items-center gap-1">
+              <span class="text-xs font-semibold">Bulk Status Change</span>
+              <input
+                type="checkbox"
+                :checked="selectAll"
+                @change="toggleSelectAll"
+                class="cursor-pointer"
+              />
+            </div>
+          </th>
           <th
-            class="col-span-1 bg-card-8 rounded-tl-md border-r border-cool-gray-200 px-3 py-3 shadow-md"
+            class="col-span-1 bg-card-8 border-r border-cool-gray-200 px-3 py-3 shadow-md"
           >
             S/N
           </th>
@@ -430,10 +472,18 @@ export default defineComponent({
           </th>
         </tr>
         <tr
-          class="grid text-cool-gray-500 w-7000 text-sm grid-cols-80"
+          class="grid text-cool-gray-500 w-7000 text-sm grid-cols-82"
           v-for="(result, index) in aquaculture"
           :key="index"
         >
+          <td class="col-span-2 bg-card-8 border-r border-t border-cool-gray-200 px-3 py-3 flex items-center justify-center">
+            <input
+              type="checkbox"
+              :checked="selectedReports.has(result.doc_id)"
+              @change="toggleReportSelection(result.doc_id)"
+              class="cursor-pointer"
+            />
+          </td>
           <td
             class="col-span-1 bg-card-8 border-r border-t border-cool-gray-200 text-cool-gray-700 px-3 py-3"
           >
@@ -789,6 +839,13 @@ export default defineComponent({
       :doc_id="doc_id"
       @open-form="closeModal"
     ></aquaculture-decline-form>
+
+    <bulk-edit-modal
+      v-if="showBulkEditModal"
+      :selected-count="selectedReports.size"
+      @close="closeBulkEditModal"
+      @confirm="handleBulkEditConfirm"
+    ></bulk-edit-modal>
   </div>
 </template>
 

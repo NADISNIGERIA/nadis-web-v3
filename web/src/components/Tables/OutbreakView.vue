@@ -2,12 +2,14 @@
 import { useOutbreak } from './../../stores/outbreak'
 import { computed, defineComponent, onMounted, ref, toRefs, watch } from 'vue'
 import OutbreakDeclineForm from './DeclineForm/OutbreakDeclineForm.vue'
+import BulkEditModal from './../BulkEditModal.vue'
+import { useBulkEdit } from './../../composables/useBulkEdit'
 import useMonths from './../../composables/months'
 import { useToast } from './../../composables/toast'
 import { utils, writeFile } from 'xlsx'
 
 export default defineComponent({
-  components: { OutbreakDeclineForm },
+  components: { OutbreakDeclineForm, BulkEditModal },
   props: {
     export_to_excel: Number,
     selected_category: String,
@@ -263,23 +265,72 @@ export default defineComponent({
       }
     }
 
+    // Initialize bulk edit composable AFTER all function declarations
+    const {
+      selectedReports,
+      selectAll,
+      showBulkEditModal,
+      toggleReportSelection,
+      toggleSelectAll,
+      openBulkEditModal,
+      closeBulkEditModal,
+      handleBulkEditConfirm
+    } = useBulkEdit(outbreak, useOutbreak(), getOutbreak)
+
     onMounted(() => {
       getOutbreak()
       outbreak_count()
     })
 
-    return { outbreak, action, doc_id, decline_form, getDate, findState, fixLocation, closeModal }
+    return {
+      outbreak,
+      action,
+      doc_id,
+      decline_form,
+      getDate,
+      findState,
+      fixLocation,
+      closeModal,
+      selectedReports,
+      selectAll,
+      showBulkEditModal,
+      toggleReportSelection,
+      toggleSelectAll,
+      openBulkEditModal,
+      closeBulkEditModal,
+      handleBulkEditConfirm
+    }
   }
 })
 </script>
 
 <template>
   <div>
+    <div class="mb-4 flex justify-end">
+      <button
+        v-if="selectedReports.size > 0"
+        @click="openBulkEditModal"
+        class="px-4 py-2 bg-blue-600 text-white rounded hover:bg-blue-700 transition-colors"
+      >
+        Bulk Edit Status ({{ selectedReports.size }} selected)
+      </button>
+    </div>
     <div class="w-full overflow-x-auto">
       <table class="w-6500 mb-10" id="outbreak_to_excel">
         <tr class="grid mt-8 mb-1 text-cool-gray-500 text-sm grid-cols-102">
+          <th class="col-span-1 bg-card-8 rounded-tl-md border-r border-cool-gray-200 px-3 py-3 shadow-md">
+            <div class="flex flex-col items-center gap-1">
+              <span class="text-xs font-semibold">Bulk Status Change</span>
+              <input
+                type="checkbox"
+                :checked="selectAll"
+                @change="toggleSelectAll"
+                class="cursor-pointer"
+              />
+            </div>
+          </th>
           <th
-            class="col-span-1 bg-card-8 rounded-tl-md border-r border-cool-gray-200 px-3 py-3 shadow-md"
+            class="col-span-1 bg-card-8 border-r border-cool-gray-200 px-3 py-3 shadow-md"
           >
             S/N
           </th>
@@ -295,7 +346,7 @@ export default defineComponent({
           <th class="col-span-3 bg-card-8 border-r border-cool-gray-200 px-3 py-3 shadow-md">
             Outbreak Type
           </th>
-          <th class="col-span-3 bg-card-8 border-r border-cool-gray-200 px-3 py-3 shadow-md">
+          <th class="col-span-2 bg-card-8 border-r border-cool-gray-200 px-3 py-3 shadow-md">
             Outbreak Number
           </th>
           <th class="col-span-3 bg-card-8 border-r border-cool-gray-200 px-3 py-3 shadow-md">
@@ -425,6 +476,14 @@ export default defineComponent({
           v-for="(result, index) in outbreak"
           :key="index"
         >
+          <td class="col-span-1 bg-card-8 border-r border-t border-cool-gray-200 px-3 py-3 flex items-center justify-center">
+            <input
+              type="checkbox"
+              :checked="selectedReports.has(result.doc_id)"
+              @change="toggleReportSelection(result.doc_id)"
+              class="cursor-pointer"
+            />
+          </td>
           <td
             class="col-span-1 bg-card-8 border-r border-t border-cool-gray-200 text-cool-gray-700 px-3 py-3"
           >
@@ -451,7 +510,7 @@ export default defineComponent({
             {{ result.outbreak_type }}
           </td>
           <td
-            class="col-span-3 bg-card-8 border-r border-t border-cool-gray-200 text-cool-gray-700 px-3 py-3"
+            class="col-span-2 bg-card-8 border-r border-t border-cool-gray-200 text-cool-gray-700 px-3 py-3"
           >
             {{ result.outbreak_num }}
           </td>
@@ -719,6 +778,13 @@ export default defineComponent({
       :doc_id="doc_id"
       @open-form="closeModal"
     ></outbreak-decline-form>
+
+    <bulk-edit-modal
+      v-if="showBulkEditModal"
+      :selected-count="selectedReports.size"
+      @close="closeBulkEditModal"
+      @confirm="handleBulkEditConfirm"
+    ></bulk-edit-modal>
   </div>
 </template>
 
