@@ -1,5 +1,5 @@
 import fb from '@/services/firebase'
-import { collection, getDocs, query, where } from 'firebase/firestore'
+import { collection, getDocs, query, where, getCountFromServer } from 'firebase/firestore'
 import { defineStore } from 'pinia'
 
 export const useCounter = defineStore('counter', {
@@ -228,32 +228,42 @@ export const useCounter = defineStore('counter', {
 
     async countReportsByState(collection_name: string, state: string) {
       try {
-        // Get all reports for the state with single query to avoid composite index
-        const allDocsQuery = query(collection(fb.db, collection_name))
-        const allDocs = await getDocs(allDocsQuery)
+        // Use efficient count queries instead of fetching all documents
+        const collectionRef = collection(fb.db, collection_name)
         
-        // Filter client-side to avoid composite index requirements
-        let totalCount = 0
-        let approvedCount = 0  
-        let pendingCount = 0
-        let progressCount = 0
+        // Count total reports for state
+        const totalQuery = query(collectionRef, where('state', '==', state))
+        const totalSnapshot = await getCountFromServer(totalQuery)
+        const totalCount = totalSnapshot.data().count
         
-        allDocs.forEach((doc) => {
-          const data = doc.data()
-          
-          // Only count reports for the specified state
-          if (data.state === state) {
-            totalCount++
-            
-            if (data.approved === true && data.finished === true) {
-              approvedCount++
-            } else if (data.approved === false && data.finished === true) {
-              pendingCount++
-            } else if (data.finished === false) {
-              progressCount++
-            }
-          }
-        })
+        // Count approved reports
+        const approvedQuery = query(
+          collectionRef, 
+          where('state', '==', state),
+          where('approved', '==', true),
+          where('finished', '==', true)
+        )
+        const approvedSnapshot = await getCountFromServer(approvedQuery)
+        const approvedCount = approvedSnapshot.data().count
+        
+        // Count pending reports  
+        const pendingQuery = query(
+          collectionRef,
+          where('state', '==', state),
+          where('approved', '==', false),
+          where('finished', '==', true)
+        )
+        const pendingSnapshot = await getCountFromServer(pendingQuery)
+        const pendingCount = pendingSnapshot.data().count
+        
+        // Count in-progress reports
+        const progressQuery = query(
+          collectionRef,
+          where('state', '==', state), 
+          where('finished', '==', false)
+        )
+        const progressSnapshot = await getCountFromServer(progressQuery)
+        const progressCount = progressSnapshot.data().count
         
         // Create mock docs objects for compatibility
         const totalDocs = { size: totalCount }
@@ -313,30 +323,22 @@ export const useCounter = defineStore('counter', {
 
     async countAgentsByState(state: string) {
       try {
-        // Get all approved users (agents)
-        const usersQuery = query(collection(fb.db, 'users'))
+        // Use more efficient query - only get approved users
+        const usersQuery = query(
+          collection(fb.db, 'users'),
+          where('approved', '==', 1)
+        )
         const usersDocs = await getDocs(usersQuery)
         
         let agentCount = 0
-        let totalApproved = 0
-        let totalWithState = 0
         
         usersDocs.forEach((doc) => {
           const data = doc.data()
-          
-          // Check if user is approved and matches the state
-          if (data.approved === 1) {
-            totalApproved++
-            
-            if (data.stateLga && data.stateLga.state) {
-              totalWithState++
-              if (data.stateLga.state === state) {
-                agentCount++
-              }
-            }
+          // Only check state for approved users (much smaller dataset)
+          if (data.stateLga && data.stateLga.state === state) {
+            agentCount++
           }
         })
-
         
         this.agents = agentCount
       } catch (error) {
@@ -347,8 +349,11 @@ export const useCounter = defineStore('counter', {
 
     async countOfficialsByState(state: string) {
       try {
-        // Get all approved admins (officials)
-        const adminsQuery = query(collection(fb.db, 'admins'))
+        // Get only approved admins (officials) - much more efficient
+        const adminsQuery = query(
+          collection(fb.db, 'admins'),
+          where('approved', '==', true)
+        )
         const adminsDocs = await getDocs(adminsQuery)
         
         let officialCount = 0
@@ -359,26 +364,17 @@ export const useCounter = defineStore('counter', {
         adminsDocs.forEach((doc) => {
           const data = doc.data()
           
-          // Debug: count all approved admins
-          if (data.approved === true) {
-            totalApproved++
-            
-            // Check different possible state field structures
-            let adminState = null
-            
-            if (data.stateLga && data.stateLga.state) {
-              adminState = data.stateLga.state
-              totalWithState++
-            } else if (data.state && data.state.trim() !== '') {
-              adminState = data.state
-              totalWithState++
-            }
-            // Note: 6 out of 7 officials have empty state fields
-            
-            if (adminState === state) {
-              officialCount++
-              totalWithMatchingState++
-            }
+          // Check different possible state field structures (already filtered by approved)
+          let adminState = null
+          
+          if (data.stateLga && data.stateLga.state) {
+            adminState = data.stateLga.state
+          } else if (data.state && data.state.trim() !== '') {
+            adminState = data.state
+          }
+          
+          if (adminState === state) {
+            officialCount++
           }
         })
 
@@ -392,9 +388,10 @@ export const useCounter = defineStore('counter', {
 
     async countAllAgents() {
       try {
+        // Use efficient count query
         const usersQuery = query(collection(fb.db, 'users'), where('approved', '==', 1))
-        const usersDocs = await getDocs(usersQuery)
-        this.agents = usersDocs.size
+        const countSnapshot = await getCountFromServer(usersQuery)
+        this.agents = countSnapshot.data().count
       } catch (error) {
         console.error('Error counting all agents:', error)
         this.agents = 0
@@ -403,9 +400,10 @@ export const useCounter = defineStore('counter', {
 
     async countAllOfficials() {
       try {
+        // Use efficient count query
         const adminsQuery = query(collection(fb.db, 'admins'), where('approved', '==', true))
-        const adminsDocs = await getDocs(adminsQuery)
-        this.officials = adminsDocs.size
+        const countSnapshot = await getCountFromServer(adminsQuery)
+        this.officials = countSnapshot.data().count
       } catch (error) {
         console.error('Error counting all officials:', error)
         this.officials = 0
