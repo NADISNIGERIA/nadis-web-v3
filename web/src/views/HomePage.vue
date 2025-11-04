@@ -1,9 +1,10 @@
 <script lang="ts">
-import { computed, defineComponent, onMounted, ref } from 'vue'
+import { computed, defineComponent, onMounted, ref, watch } from 'vue'
 // import { useAuth } from '../stores/auth'
 import { useCounter } from '../stores/counter'
 import { useMortalityRate } from './../stores/mortality_rate'
 import { useHome } from './../stores/home'
+import { useMiddleware } from '../stores/middleware'
 import AllMortality from '../components/Analytics/AllMortality.vue'
 import OutbreakMortality from '../components/Analytics/OutbreakMortality.vue'
 import SuspicionMortality from '../components/Analytics/SuspicionMortality.vue'
@@ -12,6 +13,7 @@ import StateSummary from '../components/Analytics/StateSummary.vue'
 import MapMortality from '../components/Analytics/MapMortality.vue'
 import FooterPage from '../components/FooterPage.vue'
 import PagesTop from '../components/PagesTop.vue'
+import DropArrowIcon from '../components/icons/DropArrowIcon.vue'
 import { useDashboardUpdate } from '../stores/dashboard_update'
 
 export default defineComponent({
@@ -23,7 +25,8 @@ export default defineComponent({
     StateSummary,
     MapMortality,
     FooterPage,
-    PagesTop
+    PagesTop,
+    DropArrowIcon
   },
   setup(props, ctx) {
     const active_menu = ref(1)
@@ -34,6 +37,164 @@ export default defineComponent({
     const outbreak_mortality = ref([])
     const suspicion_mortality = ref([])
     // const isUserAlreadySignedIn = computed(() => useAuth().user.uid)
+
+    // Role and state filtering
+    const role = computed(() => useMiddleware().role)
+    const selected_state = ref('All States')
+    const show_state = ref(false)
+    const search_state = ref('')
+    
+    // States list (same as in ReportsPage)
+    const states = ref([
+      {
+        name: 'Abia State',
+        id: 1
+      },
+      {
+        name: 'Adamawa State',
+        id: 2
+      },
+      {
+        name: 'Akwa Ibom State',
+        id: 3
+      },
+      {
+        name: 'Anambra State',
+        id: 4
+      },
+      {
+        name: 'Bauchi State',
+        id: 5
+      },
+      {
+        name: 'Bayelsa State',
+        id: 6
+      },
+      {
+        name: 'Benue State',
+        id: 7
+      },
+      {
+        name: 'Borno State',
+        id: 8
+      },
+      {
+        name: 'Cross River State',
+        id: 9
+      },
+      {
+        name: 'Delta State',
+        id: 10
+      },
+      {
+        name: 'Ebonyi State',
+        id: 11
+      },
+      {
+        name: 'Edo State',
+        id: 12
+      },
+      {
+        name: 'Ekiti State',
+        id: 13
+      },
+      {
+        name: 'Enugu State',
+        id: 14
+      },
+      {
+        name: 'FCT',
+        id: 15
+      },
+      {
+        name: 'Gombe State',
+        id: 16
+      },
+      {
+        name: 'Imo State',
+        id: 17
+      },
+      {
+        name: 'Jigawa State',
+        id: 18
+      },
+      {
+        name: 'Kaduna State',
+        id: 19
+      },
+      {
+        name: 'Kano State',
+        id: 20
+      },
+      {
+        name: 'Katsina State',
+        id: 21
+      },
+      {
+        name: 'Kebbi State',
+        id: 22
+      },
+      {
+        name: 'Kogi State',
+        id: 23
+      },
+      {
+        name: 'Kwara State',
+        id: 24
+      },
+      {
+        name: 'Lagos State',
+        id: 25
+      },
+      {
+        name: 'Nasarawa State',
+        id: 26
+      },
+      {
+        name: 'Niger State',
+        id: 27
+      },
+      {
+        name: 'Ogun State',
+        id: 28
+      },
+      {
+        name: 'Ondo State',
+        id: 29
+      },
+      {
+        name: 'Osun State',
+        id: 30
+      },
+      {
+        name: 'Oyo State',
+        id: 31
+      },
+      {
+        name: 'Plateau State',
+        id: 32
+      },
+      {
+        name: 'Rivers State',
+        id: 33
+      },
+      {
+        name: 'Sokoto State',
+        id: 34
+      },
+      {
+        name: 'Taraba State',
+        id: 35
+      },
+      {
+        name: 'Yobe State',
+        id: 36
+      },
+      {
+        name: 'Zamfara State',
+        id: 37
+      }
+    ])
     const abattoir = computed(() => useCounter().abattoir)
     const aquaculture = computed(() => useCounter().aquaculture)
     const laboratory = computed(() => useCounter().laboratory)
@@ -69,6 +230,57 @@ export default defineComponent({
     const officials = computed(() => useCounter().officials)
     const agents = computed(() => useCounter().agents)
 
+    // Filtered states based on search
+    const filteredStates = computed(() => {
+      if (!search_state.value) {
+        return states.value
+      }
+      return states.value.filter(state => 
+        state.name.toLowerCase().includes(search_state.value.toLowerCase())
+      )
+    })
+
+    // State filter functions
+    const selectState = (index: any) => {
+      if (index === 'All States') {
+        selected_state.value = 'All States'
+      } else {
+        // Get state from filtered results
+        const selectedState = filteredStates.value[index]
+        if (selectedState) {
+          selected_state.value = selectedState.name
+        }
+      }
+      show_state.value = false
+      search_state.value = '' // Reset search when selection is made
+      loadDashboardData()
+    }
+
+    // Load dashboard data with state filter
+    const loadDashboardData = () => {
+      const stateFilter = selected_state.value === 'All States' ? undefined : selected_state.value
+      useCounter().allCounterFiltered(stateFilter)
+      useMortalityRate().outbreakMortalityFiltered(stateFilter)
+      useMortalityRate().suspicionMortalityFiltered(stateFilter)
+      useMortalityRate().aquacultureMortalityFiltered(stateFilter)
+    }
+
+    // Close dropdown when clicking outside
+    const closeDropdown = () => {
+      show_state.value = false
+      search_state.value = ''
+    }
+
+    // Add click outside handler
+    onMounted(() => {
+      document.addEventListener('click', (event) => {
+        const target = event.target as HTMLElement
+        if (!target.closest('.state-filter-dropdown')) {
+          closeDropdown()
+        }
+      })
+    })
+
     const rateMonths = (val: any) => {
       rate_months.value = val
     }
@@ -88,14 +300,22 @@ export default defineComponent({
       suspicion_mortality.value = val
     }
 
+    // Watch for role changes to set appropriate state for non-Federal users
+    watch(role, () => {
+      const new_role = role.value.toLocaleLowerCase()
+      if (new_role != 'federal') {
+        // For non-Federal users, set their specific state and load filtered data
+        // This assumes the user's state is available in their profile
+        // For now, we'll load all data but could be enhanced to auto-select user's state
+        selected_state.value = 'All States'
+        loadDashboardData()
+      }
+    })
+
     onMounted(() => {
       ctx.emit('active-menu', active_menu.value)
-      useCounter().allCounter()
-      useMortalityRate().outbreakMortality()
-      useMortalityRate().suspicionMortality()
-      useMortalityRate().aquacultureMortality()
+      loadDashboardData()
       useDashboardUpdate().checkIfDashboardIsUpToDate()
-
       useHome().hasAccess()
     })
 
@@ -141,7 +361,16 @@ export default defineComponent({
       rateMonths,
       barLengths,
       aquacultureMortality,
-      barArray
+      barArray,
+      // State filter variables
+      role,
+      selected_state,
+      show_state,
+      search_state,
+      states,
+      filteredStates,
+      selectState,
+      closeDropdown
     }
   }
 })
@@ -150,7 +379,119 @@ export default defineComponent({
 <template>
   <div class="home">
     <pages-top :title="'Dashboard Overview'"></pages-top>
-    <div class="pt-12 px-6">
+    
+    <!-- Enhanced State Filter (Federal users only) -->
+    <div v-if="role === 'Federal'" class="pt-8 px-6">
+      <div class="bg-gradient-to-r from-blue-50 to-indigo-50 rounded-xl shadow-md p-6 mb-6 border border-blue-100">
+        <div class="flex flex-col sm:flex-row sm:items-center space-y-3 sm:space-y-0 sm:space-x-6">
+          <div class="flex items-center space-x-3">
+            <div class="w-8 h-8 bg-blue-500 rounded-lg flex items-center justify-center">
+              <svg class="w-5 h-5 text-white" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M17.657 16.657L13.414 20.9a1.998 1.998 0 01-2.827 0l-4.244-4.243a8 8 0 1111.314 0z"/>
+                <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M15 11a3 3 0 11-6 0 3 3 0 016 0z"/>
+              </svg>
+            </div>
+            <label class="text-lg font-semibold text-gray-800">Filter by State</label>
+          </div>
+          
+          <div class="relative flex-1 max-w-xs state-filter-dropdown">
+            <div
+              class="relative bg-white rounded-lg border-2 border-gray-200 hover:border-blue-300 focus-within:border-blue-500 transition-colors duration-200 cursor-pointer shadow-sm"
+              @click="show_state = !show_state"
+            >
+              <div class="px-4 py-3 flex items-center justify-between">
+                <div class="flex items-center space-x-3">
+                  <div class="w-2 h-2 rounded-full bg-blue-500"></div>
+                  <span class="text-gray-800 font-medium">{{ selected_state }}</span>
+                </div>
+                <div class="transform transition-transform duration-200" :class="{ 'rotate-180': show_state }">
+                  <svg class="w-5 h-5 text-gray-400" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                    <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M19 9l-7 7-7-7"/>
+                  </svg>
+                </div>
+              </div>
+            </div>
+            
+            <!-- Enhanced Dropdown -->
+            <div
+              v-if="show_state"
+              class="absolute top-full left-0 mt-2 w-full bg-white border border-gray-200 rounded-lg shadow-xl z-50 overflow-hidden"
+            >
+              <!-- Search Input -->
+              <div class="p-3 border-b border-gray-100">
+                <div class="relative">
+                  <svg class="absolute left-3 top-1/2 transform -translate-y-1/2 w-4 h-4 text-gray-400" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                    <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M21 21l-6-6m2-5a7 7 0 11-14 0 7 7 0 0114 0z"/>
+                  </svg>
+                  <input
+                    v-model="search_state"
+                    type="text"
+                    placeholder="Search states..."
+                    class="w-full pl-10 pr-4 py-2 border border-gray-200 rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-transparent text-sm"
+                    @click.stop
+                  />
+                </div>
+              </div>
+              
+              <!-- Options List -->
+              <div class="max-h-48 overflow-y-auto">
+                <!-- All States Option -->
+                <div
+                  class="px-4 py-3 hover:bg-blue-50 cursor-pointer transition-colors duration-150 flex items-center space-x-3 border-b border-gray-50"
+                  :class="{ 'bg-blue-100 text-blue-800': selected_state === 'All States' }"
+                  @click="selectState('All States')"
+                >
+                  <div class="w-2 h-2 rounded-full bg-gray-400"></div>
+                  <span class="font-medium">All States</span>
+                  <div class="ml-auto">
+                    <svg v-if="selected_state === 'All States'" class="w-4 h-4 text-blue-600" fill="currentColor" viewBox="0 0 20 20">
+                      <path fill-rule="evenodd" d="M16.707 5.293a1 1 0 010 1.414l-8 8a1 1 0 01-1.414 0l-4-4a1 1 0 011.414-1.414L8 12.586l7.293-7.293a1 1 0 011.414 0z" clip-rule="evenodd"/>
+                    </svg>
+                  </div>
+                </div>
+                
+                <!-- State Options -->
+                <div
+                  v-for="(state, index) in filteredStates"
+                  :key="index"
+                  class="px-4 py-3 hover:bg-blue-50 cursor-pointer transition-colors duration-150 flex items-center space-x-3"
+                  :class="{ 'bg-blue-100 text-blue-800': selected_state === state.name }"
+                  @click="selectState(index)"
+                >
+                  <div class="w-2 h-2 rounded-full bg-green-500"></div>
+                  <span>{{ state.name }}</span>
+                  <div class="ml-auto">
+                    <svg v-if="selected_state === state.name" class="w-4 h-4 text-blue-600" fill="currentColor" viewBox="0 0 20 20">
+                      <path fill-rule="evenodd" d="M16.707 5.293a1 1 0 010 1.414l-8 8a1 1 0 01-1.414 0l-4-4a1 1 0 011.414-1.414L8 12.586l7.293-7.293a1 1 0 011.414 0z" clip-rule="evenodd"/>
+                    </svg>
+                  </div>
+                </div>
+                
+                <!-- No results message -->
+                <div v-if="filteredStates.length === 0" class="px-4 py-6 text-center text-gray-500">
+                  <svg class="w-8 h-8 mx-auto mb-2 text-gray-300" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                    <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9.172 16.172a4 4 0 015.656 0M9 12h6m-6-4h6m2 5.291A7.962 7.962 0 0112 15c-2.206 0-4.206.896-5.657 2.343M16 21h-8a2 2 0 01-2-2V5a2 2 0 012-2h8a2 2 0 012 2v14a2 2 0 01-2 2z"/>
+                  </svg>
+                  <p class="text-sm">No states found</p>
+                </div>
+              </div>
+            </div>
+          </div>
+          
+          <!-- Filter Status Badge -->
+          <div v-if="selected_state !== 'All States'" class="flex items-center space-x-2">
+            <span class="inline-flex items-center px-3 py-1 rounded-full text-xs font-medium bg-blue-100 text-blue-800">
+              <svg class="w-3 h-3 mr-1" fill="currentColor" viewBox="0 0 20 20">
+                <path fill-rule="evenodd" d="M3 3a1 1 0 011-1h12a1 1 0 011 1v3a1 1 0 01-.293.707L12 11.414V15a1 1 0 01-.293.707l-2 2A1 1 0 018 17v-5.586L3.293 6.707A1 1 0 013 6V3z" clip-rule="evenodd"/>
+              </svg>
+              Filtered
+            </span>
+          </div>
+        </div>
+      </div>
+    </div>
+    
+    <div class="pt-4 px-6" :class="{ 'pt-0': role === 'Federal' }">
       <div class="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-5 gap-6">
         <!-- Total Approved Card -->
         <div class="bg-white rounded-2xl shadow-lg hover:shadow-xl transition-all duration-300 overflow-hidden group">

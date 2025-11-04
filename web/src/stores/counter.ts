@@ -1,5 +1,5 @@
 import fb from '@/services/firebase'
-import { collection, getDocs } from 'firebase/firestore'
+import { collection, getDocs, query, where, getCountFromServer } from 'firebase/firestore'
 import { defineStore } from 'pinia'
 
 export const useCounter = defineStore('counter', {
@@ -172,6 +172,241 @@ export const useCounter = defineStore('counter', {
       const docs = await getDocs(collection(fb.db, 'veterinarian_reports'))
       if (!docs.empty) {
         this.veterinarian = docs.docs.length
+      }
+    },
+    
+    // State-filtered counter methods
+    async allCounterFiltered(state?: string) {
+      this.loading = true
+      
+      if (!state || state === 'All States') {
+        // If no state filter, use direct counting for accurate totals
+        await this.countAllAgents()
+        await this.countAllOfficials()
+        
+        // Use existing method for reports but don't let it override our counts
+        const tempAgents = this.agents
+        const tempOfficials = this.officials
+        
+        await this.allCounter()
+        
+        // Restore our accurate counts
+        this.agents = tempAgents
+        this.officials = tempOfficials
+        return
+      }
+
+      // Clear all counters
+      this.clearAll()
+
+      try {
+        // Count reports by state for each report type
+        await Promise.all([
+          this.countReportsByState('abattoir_reports', state),
+          this.countReportsByState('aquaculture_reports', state),
+          this.countReportsByState('laboratory_reports', state),
+          this.countReportsByState('outbreak_reports', state),
+          this.countReportsByState('suspicion_reports', state),
+          this.countReportsByState('vaccination_reports', state),
+          this.countReportsByState('veterinarian_reports', state)
+        ])
+        
+        // Count agents and officials by state
+        await Promise.all([
+          this.countAgentsByState(state),
+          this.countOfficialsByState(state)
+        ])
+        
+      } catch (error) {
+        console.error('Error loading filtered dashboard data:', error)
+        // Fallback to unfiltered data
+        await this.allCounter()
+      } finally {
+        this.loading = false
+      }
+    },
+
+    async countReportsByState(collection_name: string, state: string) {
+      try {
+        // Use efficient count queries instead of fetching all documents
+        const collectionRef = collection(fb.db, collection_name)
+        
+        // Count total reports for state
+        const totalQuery = query(collectionRef, where('state', '==', state))
+        const totalSnapshot = await getCountFromServer(totalQuery)
+        const totalCount = totalSnapshot.data().count
+        
+        // Count approved reports
+        const approvedQuery = query(
+          collectionRef, 
+          where('state', '==', state),
+          where('approved', '==', true),
+          where('finished', '==', true)
+        )
+        const approvedSnapshot = await getCountFromServer(approvedQuery)
+        const approvedCount = approvedSnapshot.data().count
+        
+        // Count pending reports  
+        const pendingQuery = query(
+          collectionRef,
+          where('state', '==', state),
+          where('approved', '==', false),
+          where('finished', '==', true)
+        )
+        const pendingSnapshot = await getCountFromServer(pendingQuery)
+        const pendingCount = pendingSnapshot.data().count
+        
+        // Count in-progress reports
+        const progressQuery = query(
+          collectionRef,
+          where('state', '==', state), 
+          where('finished', '==', false)
+        )
+        const progressSnapshot = await getCountFromServer(progressQuery)
+        const progressCount = progressSnapshot.data().count
+        
+        // Create mock docs objects for compatibility
+        const totalDocs = { size: totalCount }
+        const approvedDocs = { size: approvedCount }
+        const pendingDocs = { size: pendingCount }
+        const progressDocs = { size: progressCount }
+
+        // Set the appropriate counters based on collection type
+        switch (collection_name) {
+          case 'abattoir_reports':
+            this.abattoir = totalDocs.size
+            this.approved_abattoir = approvedDocs.size
+            this.pending_abattoir = pendingDocs.size
+            this.progress_abattoir = progressDocs.size
+            break
+          case 'aquaculture_reports':
+            this.aquaculture = totalDocs.size
+            this.approved_aquaculture = approvedDocs.size
+            this.pending_aquaculture = pendingDocs.size
+            this.progress_aquaculture = progressDocs.size
+            break
+          case 'laboratory_reports':
+            this.laboratory = totalDocs.size
+            this.approved_laboratory = approvedDocs.size
+            this.pending_laboratory = pendingDocs.size
+            this.progress_laboratory = progressDocs.size
+            break
+          case 'outbreak_reports':
+            this.outbreak = totalDocs.size
+            this.approved_outbreak = approvedDocs.size
+            this.pending_outbreak = pendingDocs.size
+            this.progress_outbreak = progressDocs.size
+            break
+          case 'suspicion_reports':
+            this.suspicion = totalDocs.size
+            this.approved_suspicion = approvedDocs.size
+            this.pending_suspicion = pendingDocs.size
+            this.progress_suspicion = progressDocs.size
+            break
+          case 'vaccination_reports':
+            this.vaccination = totalDocs.size
+            this.approved_vaccination = approvedDocs.size
+            this.pending_vaccination = pendingDocs.size
+            this.progress_vaccination = progressDocs.size
+            break
+          case 'veterinarian_reports':
+            this.veterinarian = totalDocs.size
+            this.approved_veterinarian = approvedDocs.size
+            this.pending_veterinarian = pendingDocs.size
+            this.progress_veterinarian = progressDocs.size
+            break
+        }
+      } catch (error) {
+        console.error(`Error counting ${collection_name} by state:`, error)
+      }
+    },
+
+    async countAgentsByState(state: string) {
+      try {
+        // Use more efficient query - only get approved users
+        const usersQuery = query(
+          collection(fb.db, 'users'),
+          where('approved', '==', 1)
+        )
+        const usersDocs = await getDocs(usersQuery)
+        
+        let agentCount = 0
+        
+        usersDocs.forEach((doc) => {
+          const data = doc.data()
+          // Only check state for approved users (much smaller dataset)
+          if (data.stateLga && data.stateLga.state === state) {
+            agentCount++
+          }
+        })
+        
+        this.agents = agentCount
+      } catch (error) {
+        console.error(`Error counting agents by state:`, error)
+        this.agents = 0
+      }
+    },
+
+    async countOfficialsByState(state: string) {
+      try {
+        // Get only approved admins (officials) - much more efficient
+        const adminsQuery = query(
+          collection(fb.db, 'admins'),
+          where('approved', '==', true)
+        )
+        const adminsDocs = await getDocs(adminsQuery)
+        
+        let officialCount = 0
+        let totalApproved = 0
+        let totalWithState = 0
+        let totalWithMatchingState = 0
+        
+        adminsDocs.forEach((doc) => {
+          const data = doc.data()
+          
+          // Check different possible state field structures (already filtered by approved)
+          let adminState = null
+          
+          if (data.stateLga && data.stateLga.state) {
+            adminState = data.stateLga.state
+          } else if (data.state && data.state.trim() !== '') {
+            adminState = data.state
+          }
+          
+          if (adminState === state) {
+            officialCount++
+          }
+        })
+
+        
+        this.officials = officialCount
+      } catch (error) {
+        console.error(`Error counting officials by state:`, error)
+        this.officials = 0
+      }
+    },
+
+    async countAllAgents() {
+      try {
+        // Use efficient count query
+        const usersQuery = query(collection(fb.db, 'users'), where('approved', '==', 1))
+        const countSnapshot = await getCountFromServer(usersQuery)
+        this.agents = countSnapshot.data().count
+      } catch (error) {
+        console.error('Error counting all agents:', error)
+        this.agents = 0
+      }
+    },
+
+    async countAllOfficials() {
+      try {
+        // Use efficient count query
+        const adminsQuery = query(collection(fb.db, 'admins'), where('approved', '==', true))
+        const countSnapshot = await getCountFromServer(adminsQuery)
+        this.officials = countSnapshot.data().count
+      } catch (error) {
+        console.error('Error counting all officials:', error)
+        this.officials = 0
       }
     }
   }
