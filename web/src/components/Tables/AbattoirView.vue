@@ -291,6 +291,15 @@ export default defineComponent({
       handleBulkEditConfirm
     } = useBulkEdit(abattoir, useAbattoir(), getAbattoir)
 
+    const handleBulkAction = (event: Event) => {
+      const target = event.target as HTMLSelectElement
+      const action = target.value
+      if (action) {
+        handleBulkEditConfirm(action)
+        target.value = '' // Reset dropdown
+      }
+    }
+
     onMounted(() => {
       getAbattoir()
     })
@@ -315,7 +324,8 @@ export default defineComponent({
       toggleSelectAll,
       openBulkEditModal,
       closeBulkEditModal,
-      handleBulkEditConfirm
+      handleBulkEditConfirm,
+      handleBulkAction
     }
   }
 })
@@ -323,28 +333,26 @@ export default defineComponent({
 
 <template>
   <div>
-    <!-- Bulk Edit Button -->
-    <div class="mb-4">
-      <button
-        v-if="selectedReports.size > 0"
-        @click="openBulkEditModal"
-        class="px-4 py-2 bg-blue-600 text-white rounded hover:bg-blue-700 transition-colors"
-      >
-        Bulk Edit Status ({{ selectedReports.size }} selected)
-      </button>
-    </div>
-
     <div class="w-full overflow-x-auto">
       <table class="w-6000 mb-10" id="abattoir_to_excel">
         <tr class="grid mt-8 mb-1 text-cool-gray-500 text-sm grid-cols-78">
           <th class="col-span-2 bg-card-8 rounded-tl-md border-r border-cool-gray-200 px-3 py-3 shadow-md">
             <div class="flex flex-col items-center gap-1">
-              <span class="text-xs font-semibold">Bulk Status Change</span>
+              <select
+                v-if="selectedReports.size > 0"
+                @change="handleBulkAction"
+                class="text-xs px-2 py-1 bg-blue-600 text-white rounded cursor-pointer focus:outline-none"
+              >
+                <option value="">Actions ({{ selectedReports.size }})</option>
+                <option value="pending">Set to Pending</option>
+                <option value="in_progress">Set to In Progress</option>
+                <option value="approved">Set to Approved</option>
+              </select>
               <input
                 type="checkbox"
                 :checked="selectAll"
                 @change="toggleSelectAll"
-                class="w-4 h-4 text-blue-600 border-gray-300 rounded focus:ring-blue-500 cursor-pointer"
+                class="cursor-pointer"
               />
             </div>
           </th>
@@ -465,7 +473,7 @@ export default defineComponent({
               type="checkbox"
               :checked="selectedReports.has(result.doc_id)"
               @change="toggleReportSelection(result.doc_id)"
-              class="w-4 h-4 text-blue-600 border-gray-300 rounded focus:ring-blue-500"
+              class="cursor-pointer"
             />
           </td>
           <td
