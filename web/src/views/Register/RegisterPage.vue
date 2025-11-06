@@ -8,7 +8,6 @@ declare global {
 }
 
 import {
-  getAuth,
   onAuthStateChanged,
   RecaptchaVerifier,
   signInWithPhoneNumber
@@ -67,8 +66,8 @@ export default defineComponent({
 
     onMounted(() => {
       if (isUserAlreadySignedIn.value == null) {
-        const auth = getAuth()
         window.recaptchaVerifier = new RecaptchaVerifier(
+          fb.auth,
           'sign-in-button',
           {
             size: 'invisible',
@@ -77,8 +76,7 @@ export default defineComponent({
               console.log(response)
               getCode()
             }
-          },
-          auth
+          }
         )
 
         window.recaptchaVerifier.render().then((widgetId: any) => {
