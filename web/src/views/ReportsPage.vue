@@ -1521,7 +1521,7 @@ export default defineComponent({
         </div>
         <div
           v-if="show_state && role == 'Federal'"
-          class="pt-2 absolute bg-card-5 -ml-4 border border-card-9 rounded rounded-t-none h-96 overflow-y-scroll"
+          class="pt-2 absolute bg-card-5 -ml-4 border border-card-9 rounded rounded-t-none h-96 overflow-y-scroll z-50"
         >
           <div
             class="text-primary hover:bg-card-4 py-2 pl-4 pr-10"

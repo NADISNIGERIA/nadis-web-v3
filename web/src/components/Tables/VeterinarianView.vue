@@ -5,9 +5,39 @@ import { useVeterinarian } from './../../stores/veterinarian'
 import VeterinarianDeclineForm from './DeclineForm/VeterinarianDeclineForm.vue'
 import { useToast } from './../../composables/toast'
 import { utils, writeFile } from 'xlsx'
+import {
+  BulkActionsToolbar,
+  createFindStateFunction,
+  createFixLocationFunction,
+  createGetDateFunction,
+  createSortedComputed
+} from './GenericDataTableView.vue'
+
+// Define TypeScript interface for Veterinarian report
+interface VeterinarianReport {
+  doc_id: string
+  created_at: number
+  date?: number
+  name_of_hospital?: string
+  type_of_report?: string
+  location?: {
+    lat: number
+    lng: number
+  }
+  disease?: string
+  other_diseases?: string
+  species?: string
+  age?: string | number
+  sex?: string
+  address_affected_farm?: string
+  diagnosis?: string
+  measures?: string
+  approved: boolean
+  finished: boolean
+}
 
 export default defineComponent({
-  components: { VeterinarianDeclineForm },
+  components: { VeterinarianDeclineForm, BulkActionsToolbar },
   props: {
     export_to_excel: Number,
     selected_category: String,
@@ -21,14 +51,42 @@ export default defineComponent({
       selected_state: selected_state
     } = toRefs(props)
     const months = ref(useMonths().months)
-    const action = ref('') as any
     const doc_id = ref('')
     const decline_form = ref(false)
     const { success, error, warning } = useToast()
 
     const reporter_state = computed(() => useVeterinarian().reporter_state)
-    const veterinarian = computed(() => useVeterinarian().veterinarian) as any
+    const veterinarian = computed(() => useVeterinarian().veterinarian as VeterinarianReport[])
     const successful = computed(() => useVeterinarian().successful)
+    const loading = computed(() => useVeterinarian().loading)
+    const pagination = computed(() => useVeterinarian().pagination)
+
+    // Vuetify data table state
+    const itemsPerPage = ref(20)
+    const selectedReports = ref<VeterinarianReport[]>([])
+    const sortBy = ref<any[]>([{ key: 'created_at', order: 'desc' }])
+
+    const sortedVeterinarian = computed(createSortedComputed(veterinarian, sortBy))
+
+    // Define table headers
+    const headers = ref([
+      { title: 'S/N', key: 'index', sortable: false, width: 60 },
+      { title: 'Created Date', key: 'date', sortable: true, width: 140 },
+      { title: 'Report State - LGA', key: 'state_lga', sortable: false, width: 180 },
+      { title: 'Name of Clinic - Hospital', key: 'name_of_hospital', sortable: false, width: 220 },
+      { title: 'Type of Report', key: 'type_of_report', sortable: false, width: 150 },
+      { title: 'Location - Latitude', key: 'location.lat', sortable: false, width: 160 },
+      { title: 'Location - Longitude', key: 'location.lng', sortable: false, width: 160 },
+      { title: 'Disease Suspected', key: 'disease', sortable: false, width: 160 },
+      { title: 'Other Diseases', key: 'other_diseases', sortable: false, width: 160 },
+      { title: 'Type of Animal', key: 'species', sortable: false, width: 150 },
+      { title: 'Age', key: 'age', sortable: false, width: 100 },
+      { title: 'Sex', key: 'sex', sortable: false, width: 100 },
+      { title: 'Address of Affected Farm', key: 'address_affected_farm', sortable: false, width: 220 },
+      { title: 'Diagnosis', key: 'diagnosis', sortable: false, width: 150 },
+      { title: 'Measures', key: 'measures', sortable: false, width: 150 },
+      { title: 'Action', key: 'actions', sortable: false, width: 180 }
+    ])
 
     watch(selected_category, () => {
       getVeterinarian()
@@ -38,9 +96,6 @@ export default defineComponent({
     })
     watch(successful, () => {
       getVeterinarian()
-    })
-    watch(action, () => {
-      performAction()
     })
     watch(export_to_excel, () => {
       exportTableToExcel()
@@ -67,57 +122,60 @@ export default defineComponent({
       }
       useVeterinarian().getVeterinarian(values)
     }
-    const getDate = (val: any) => {
-      if (!val) return 'Invalid Date'
-      const month = new Date(val).getMonth()
-      const day = new Date(val).getDate()
-      const year = new Date(val).getFullYear()
-      
-      // Safety check for months array
-      if (!months.value || !months.value[month]) {
-        return 'Invalid Date'
+
+    const loadNextPage = () => {
+      let sort = false
+      let progress = false
+      if (selected_category.value == 'Approved') {
+        sort = true
+        progress = false
+      } else if (selected_category.value == 'Pending') {
+        sort = false
+        progress = false
+      } else if (selected_category.value == 'In Progress') {
+        sort = false
+        progress = true
       }
-      
-      return months.value[month].short + ' ' + day + ', ' + year
-    }
-    const fixLocation = (val: any) => {
-      if (val !== undefined) {
-        return val.toFixed(6)
-      } else {
-        return 'Unable to get location.'
+
+      const values = {
+        category: sort,
+        state: selected_state.value,
+        in_progress: progress
       }
-    }
-    const performAction = () => {
-      if (action.value != '') {
-        var index = action.value.match(/\d+/)[0]
-        if (index >= 0) {
-          const document_id = veterinarian.value[index].doc_id
-          if (action.value == 'in_progress_' + index) {
-            useVeterinarian().in_progress(document_id)
-          } else if (action.value == 'approve_' + index) {
-            useVeterinarian().approve(document_id)
-          } else if (action.value == 'pending_' + index) {
-            useVeterinarian().pending(document_id)
-          } else if (action.value == 'decline_' + index) {
-            declineForm(document_id)
-          }
-        }
-        action.value = ''
+
+      if (pagination.value.hasMore && !loading.value) {
+        useVeterinarian().loadNextPage(values)
       }
     }
-    const declineForm = (doc_id: any) => {
+
+    const getDate = createGetDateFunction(months)
+    const fixLocation = createFixLocationFunction()
+
+    const performAction = (action: string, docId: string) => {
+      if (action === 'in_progress') {
+        useVeterinarian().in_progress(docId)
+      } else if (action === 'approve') {
+        useVeterinarian().approve(docId)
+      } else if (action === 'pending') {
+        useVeterinarian().pending(docId)
+      } else if (action === 'decline') {
+        declineForm(docId)
+      }
+    }
+
+    const declineForm = (id: string) => {
       decline_form.value = true
-      doc_id.value = doc_id
+      doc_id.value = id
     }
+
     const closeModal = () => {
       decline_form.value = false
     }
+
     const exportTableToExcel = async () => {
       try {
-        // Get export filters from global state (set by ReportsPage)
         const exportFilters = (window as any).exportFilters || {}
-        
-        // Prepare filters for the export method
+
         const filters = {
           category: selected_category.value === 'Approved',
           state: selected_state.value || 'All States',
@@ -126,15 +184,13 @@ export default defineComponent({
           endDate: exportFilters.endDate
         }
 
-        // Fetch filtered data from store (no pagination limits)
         const exportData = await useVeterinarian().exportVeterinarian(filters)
-        
+
         if (exportData.length === 0) {
           warning('No veterinarian reports found matching your selected filters. Try adjusting your date range or filters.')
           return
         }
 
-        // Prepare headers
         const headers = [
           'Date Reported',
           'State',
@@ -146,7 +202,6 @@ export default defineComponent({
           'Reporter'
         ]
 
-        // Prepare data rows
         const rows = exportData.map((item: any) => {
           const reporterState = findState(item.doc_id)
           return [
@@ -161,26 +216,21 @@ export default defineComponent({
           ]
         })
 
-        // Combine headers and data
         const worksheetData = [headers, ...rows]
-        
-        // Generate base filename
+
         let baseFilename = `${selected_category.value || 'All'}_Veterinarian_Reports`
         if (exportFilters.startDate || exportFilters.endDate) {
           baseFilename += '_Filtered'
         }
         baseFilename += `_${Date.now()}`
 
-        // Export based on selected format
         const format = exportFilters.format || 'excel'
-        
+
         if (format === 'csv') {
-          // Create CSV content
-          const csvContent = worksheetData.map(row => 
+          const csvContent = worksheetData.map(row =>
             row.map(cell => `"${String(cell).replace(/"/g, '""')}"`).join(',')
           ).join('\n')
-          
-          // Create and download CSV
+
           const blob = new Blob([csvContent], { type: 'text/csv;charset=utf-8;' })
           const link = document.createElement('a')
           link.href = URL.createObjectURL(blob)
@@ -188,7 +238,6 @@ export default defineComponent({
           link.click()
           URL.revokeObjectURL(link.href)
         } else if (format === 'pdf') {
-          // Create HTML content for PDF printing
           const htmlContent = `
             <html>
               <head>
@@ -206,15 +255,15 @@ export default defineComponent({
                 <div class="header">
                   <h2>Veterinarian Reports - ${selected_category.value || 'All'}</h2>
                   <p>Generated on: ${new Date().toLocaleString()}</p>
-                  ${exportFilters.startDate || exportFilters.endDate ? 
-                    `<p>Date Range: ${exportFilters.startDate || 'No start'} to ${exportFilters.endDate || 'No end'}</p>` : 
+                  ${exportFilters.startDate || exportFilters.endDate ?
+                    `<p>Date Range: ${exportFilters.startDate || 'No start'} to ${exportFilters.endDate || 'No end'}</p>` :
                     '<p>Date Range: All dates</p>'
                   }
                   <p>Total Records: ${exportData.length}</p>
                 </div>
                 <table>
-                  ${worksheetData.map((row, index) => 
-                    `<tr>${row.map(cell => 
+                  ${worksheetData.map((row, index) =>
+                    `<tr>${row.map(cell =>
                       index === 0 ? `<th>${cell}</th>` : `<td>${cell}</td>`
                     ).join('')}</tr>`
                   ).join('')}
@@ -222,7 +271,7 @@ export default defineComponent({
               </body>
             </html>
           `
-          
+
           const printWindow = window.open('', '_blank')
           if (printWindow) {
             printWindow.document.write(htmlContent)
@@ -230,25 +279,39 @@ export default defineComponent({
             printWindow.print()
           }
         } else {
-          // Default to Excel format
           const workbook = utils.book_new()
           const worksheet = utils.aoa_to_sheet(worksheetData)
           utils.book_append_sheet(workbook, worksheet, 'Veterinarian Reports')
           writeFile(workbook, `${baseFilename}.xlsx`)
         }
-        
+
         success(`Successfully exported ${exportData.length} veterinarian reports to ${format === 'csv' ? 'CSV' : format === 'pdf' ? 'PDF' : 'Excel'}.`)
       } catch (exportError) {
         console.error('Error exporting veterinarian data:', exportError)
         error('Failed to export veterinarian reports. Please try again or contact support if the issue persists.')
       }
     }
-    const findState = (id: string) => {
-      const found_reporter = reporter_state.value.find((reporter: any) => reporter.doc_id === id)
-      if (found_reporter != undefined) {
-        return found_reporter.state_lga
-      } else {
-        return { state: 'null', local_govt: 'null' }
+
+    const findState = createFindStateFunction(reporter_state)
+
+    // Bulk actions
+    const handleBulkAction = async (action: string) => {
+      if (selectedReports.value.length === 0) {
+        warning('Please select at least one report')
+        return
+      }
+
+      const docIds = selectedReports.value.map(report => report.doc_id)
+      const result = await useVeterinarian().bulkUpdateStatus(docIds, action as any)
+
+      if (result.success.length > 0) {
+        success(`Successfully updated ${result.success.length} reports`)
+        selectedReports.value = []
+        getVeterinarian()
+      }
+
+      if (result.failed.length > 0) {
+        error(`Failed to update ${result.failed.length} reports`)
       }
     }
 
@@ -258,13 +321,22 @@ export default defineComponent({
 
     return {
       veterinarian,
+      sortedVeterinarian,
       decline_form,
-      action,
       doc_id,
-      closeModal,
+      headers,
+      itemsPerPage,
+      selectedReports,
+      sortBy,
       getDate,
       findState,
-      fixLocation
+      fixLocation,
+      closeModal,
+      loading,
+      pagination,
+      loadNextPage,
+      performAction,
+      handleBulkAction
     }
   }
 })
@@ -272,172 +344,112 @@ export default defineComponent({
 
 <template>
   <div>
-    <div class="w-full overflow-x-auto">
-      <table class="w-2600 mb-10" id="Veterinarian_to_excel">
-        <tr class="grid mt-8 mb-1 text-cool-gray-500 text-sm grid-cols-35">
-          <th
-            class="col-span-1 bg-card-8 rounded-tl-md border-r border-cool-gray-200 px-3 py-3 shadow-md"
+    <BulkActionsToolbar
+      :selected-reports="selectedReports"
+      @bulk-action="handleBulkAction"
+      @clear-selection="selectedReports = []"
+    />
+
+    <!-- Vuetify Data Table -->
+    <v-data-table
+      v-model="selectedReports"
+      v-model:items-per-page="itemsPerPage"
+      v-model:sort-by="sortBy"
+      :headers="headers"
+      :items="sortedVeterinarian"
+      :loading="loading"
+      show-select
+      return-object
+      item-value="doc_id"
+      class="elevation-1"
+      fixed-header
+      height="600px"
+    >
+      <!-- Serial Number Column -->
+      <template v-slot:item.index="{ index }">
+        {{ index + 1 }}
+      </template>
+
+      <!-- Date Column -->
+      <template v-slot:item.date="{ item }">
+        {{ item.date ? getDate(item.date) : 'N/A' }}
+      </template>
+
+      <!-- State/LGA Column -->
+      <template v-slot:item.state_lga="{ item }">
+        {{ findState(item.doc_id).state }} / {{ findState(item.doc_id).local_govt }}
+      </template>
+
+      <!-- Location Latitude -->
+      <template v-slot:item.location.lat="{ item }">
+        {{ item.location?.lat ? fixLocation(item.location.lat) : 'N/A' }}
+      </template>
+
+      <!-- Location Longitude -->
+      <template v-slot:item.location.lng="{ item }">
+        {{ item.location?.lng ? fixLocation(item.location.lng) : 'N/A' }}
+      </template>
+
+      <!-- Actions Column -->
+      <template v-slot:item.actions="{ item }">
+        <v-select
+          :items="[
+            { title: '-- Select Action --', value: '' },
+            ...(item.finished ? [{ title: 'In Progress', value: 'in_progress' }] : []),
+            ...(!item.approved ? [{ title: 'Approve', value: 'approve' }] : []),
+            ...(item.approved ? [{ title: 'Pending', value: 'pending' }] : []),
+            ...(item.finished ? [{ title: 'Decline', value: 'decline' }] : [])
+          ]"
+          density="compact"
+          variant="outlined"
+          hide-details
+          :model-value="''"
+          @update:model-value="(value: string) => value && performAction(value, item.doc_id)"
+        ></v-select>
+      </template>
+
+      <!-- Loading Slot -->
+      <template v-slot:loading>
+        <v-skeleton-loader type="table-row@10"></v-skeleton-loader>
+      </template>
+
+      <!-- No Data Slot -->
+      <template v-slot:no-data>
+        <div class="text-center py-8">
+          <div class="text-gray-500 text-lg">No reports found</div>
+          <div class="text-gray-400 text-sm mt-2">
+            Try adjusting your filters or check back later
+          </div>
+        </div>
+      </template>
+
+      <!-- Bottom Slot for Load More -->
+      <template v-slot:bottom>
+        <div class="text-center pa-4">
+          <v-btn
+            v-if="pagination.hasMore"
+            @click="loadNextPage"
+            :loading="loading"
+            color="primary"
+            variant="outlined"
           >
-            S/N
-          </th>
-          <th class="col-span-2 bg-card-8 border-r border-cool-gray-200 px-3 py-3 shadow-md">
-            Created Date
-          </th>
-          <th class="col-span-2 bg-card-8 border-r border-cool-gray-200 px-3 py-3 shadow-md">
-            Report State / LGA
-          </th>
-          <th class="col-span-3 bg-card-8 border-r border-cool-gray-200 px-3 py-3 shadow-md">
-            Name of Clinic / Hospital
-          </th>
-          <th class="col-span-2 bg-card-8 border-r border-cool-gray-200 px-3 py-3 shadow-md">
-            Type of Report
-          </th>
-          <th class="col-span-2 bg-card-8 border-r border-cool-gray-200 px-3 py-3 shadow-md">
-            Location /
-            <span>Latitude</span>
-          </th>
-          <th class="col-span-2 bg-card-8 border-r border-cool-gray-200 px-3 py-3 shadow-md">
-            Location /
-            <span>Longitude</span>
-          </th>
-          <th class="col-span-2 bg-card-8 border-r border-cool-gray-200 px-3 py-3 shadow-md">
-            Disease Suspected
-          </th>
-          <th class="col-span-2 bg-card-8 border-r border-cool-gray-200 px-3 py-3 shadow-md">
-            Other Diseases
-          </th>
-          <th class="col-span-2 bg-card-8 border-r border-cool-gray-200 px-3 py-3 shadow-md">
-            Type of Animal
-          </th>
-          <th class="col-span-2 bg-card-8 border-r border-cool-gray-200 px-3 py-3 shadow-md">
-            Age
-          </th>
-          <th class="col-span-2 bg-card-8 border-r border-cool-gray-200 px-3 py-3 shadow-md">
-            Sex
-          </th>
-          <th class="col-span-4 bg-card-8 border-r border-cool-gray-200 px-3 py-3 shadow-md">
-            Address of Affected Farm
-          </th>
-          <th class="col-span-2 bg-card-8 border-r border-cool-gray-200 px-3 py-3 shadow-md">
-            Diagnosis
-          </th>
-          <th class="col-span-2 bg-card-8 border-r border-cool-gray-200 px-3 py-3 shadow-md">
-            Measures
-          </th>
-          <th class="col-span-3 bg-card-8 border-r border-cool-gray-200 px-3 py-3 shadow-md">
-            Action
-          </th>
-        </tr>
-        <tr
-          class="grid text-cool-gray-500 w-2600 text-sm grid-cols-35"
-          v-for="(result, index) in veterinarian"
-          :key="index"
-        >
-          <td
-            class="col-span-1 bg-card-8 border-r border-t border-cool-gray-200 text-cool-gray-700 px-3 py-3"
-          >
-            {{ index + 1 }}
-          </td>
-          <td
-            class="col-span-2 bg-card-8 border-r border-t border-cool-gray-200 text-cool-gray-700 px-3 py-3"
-          >
-            {{ result.date ? getDate(result.date) : '' }}
-          </td>
-          <td
-            class="col-span-2 bg-card-8 border-r border-t border-cool-gray-200 text-cool-gray-700 px-3 py-3"
-          >
-            {{ findState(result.doc_id).state + ' / ' + findState(result.doc_id).local_govt }}
-          </td>
-          <td
-            class="col-span-3 bg-card-8 border-r border-t border-cool-gray-200 text-cool-gray-700 px-3 py-3"
-          >
-            {{ result.name_of_hospital }}
-          </td>
-          <td
-            class="col-span-2 bg-card-8 border-r border-t border-cool-gray-200 text-cool-gray-700 px-3 py-3"
-          >
-            {{ result.type_of_report ? result.type_of_report : '' }}
-          </td>
-          <td
-            class="col-span-2 bg-card-8 border-r border-t border-cool-gray-200 text-cool-gray-700 px-3 py-3"
-          >
-            {{
-              result.location ? (result.location.lat ? fixLocation(result.location.lat) : '') : ''
-            }}
-          </td>
-          <td
-            class="col-span-2 bg-card-8 border-r border-t border-cool-gray-200 text-cool-gray-700 px-3 py-3"
-          >
-            {{
-              result.location ? (result.location.lng ? fixLocation(result.location.lng) : '') : ''
-            }}
-          </td>
-          <td
-            class="col-span-2 bg-card-8 border-r border-t border-cool-gray-200 text-cool-gray-700 px-3 py-3"
-          >
-            {{ result.disease ? result.disease : '' }}
-          </td>
-          <td
-            class="col-span-2 bg-card-8 border-r border-t border-cool-gray-200 text-cool-gray-700 px-3 py-3"
-          >
-            {{ result.other_diseases ? result.other_diseases : '' }}
-          </td>
-          <td
-            class="col-span-2 bg-card-8 border-r border-t border-cool-gray-200 text-cool-gray-700 px-3 py-3"
-          >
-            {{ result.species ? result.species : '' }}
-          </td>
-          <td
-            class="col-span-2 bg-card-8 border-r border-t border-cool-gray-200 text-cool-gray-700 px-3 py-3"
-          >
-            {{ result.age ? result.age : '' }}
-          </td>
-          <td
-            class="col-span-2 bg-card-8 border-r border-t border-cool-gray-200 text-cool-gray-700 px-3 py-3"
-          >
-            {{ result.sex ? result.sex : '' }}
-          </td>
-          <td
-            class="col-span-4 bg-card-8 border-r border-t border-cool-gray-200 text-cool-gray-700 px-3 py-3"
-          >
-            {{ result.address_affected_farm ? result.address_affected_farm : '' }}
-          </td>
-          <td
-            class="col-span-2 bg-card-8 border-r border-t border-cool-gray-200 text-cool-gray-700 px-3 py-3"
-          >
-            {{ result.diagnosis ? result.diagnosis : '' }}
-          </td>
-          <td
-            class="col-span-2 bg-card-8 border-r border-t border-cool-gray-200 text-cool-gray-700 px-3 py-3"
-          >
-            {{ result.measures ? result.measures : '' }}
-          </td>
-          <td class="col-span-3 bg-card-8 border-r border-t border-cool-gray-200 px-3 py-3">
-            <select class="px-2 py-1 text-sm bg-card-8 focus:outline-none" v-model="action">
-              <option value="">-- Select Action --</option>
-              <option :value="'in_progress_' + index" v-if="result.finished">In Progress</option>
-              <option :value="'approve_' + index" v-if="!result.approved">Approve</option>
-              <option :value="'pending_' + index" v-if="result.approved">Pending</option>
-              <option :value="'decline_' + index" v-if="result.finished">Decline</option>
-            </select>
-          </td>
-        </tr>
-      </table>
-    </div>
+            Load More
+          </v-btn>
+          <div v-else class="text-sm text-gray-500">
+            All reports loaded ({{ veterinarian.length }} total)
+          </div>
+        </div>
+      </template>
+    </v-data-table>
+
+    <!-- Decline Form Modal -->
     <veterinarian-decline-form
       v-if="decline_form"
       :full="full"
       :doc_id="doc_id"
-      @open-form="closeModal()"
+      @open-form="closeModal"
     ></veterinarian-decline-form>
   </div>
 </template>
 
-<style scoped>
-.w-2400 {
-  width: 2400px;
-}
-.w-2600 {
-  width: 2600px;
-}
-</style>
+<style scoped src="./GenericDataTableStyles.css"></style>

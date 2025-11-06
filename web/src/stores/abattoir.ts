@@ -310,6 +310,52 @@ export const useAbattoir = defineStore('abattoir', {
       }
     },
 
+    // Bulk edit methods
+    async bulkUpdateStatus(docIds: string[], newStatus: 'pending' | 'in_progress' | 'approved') {
+      this.loading = true
+      const results = {
+        success: [] as string[],
+        failed: [] as string[]
+      }
+
+      try {
+        for (const docId of docIds) {
+          try {
+            const updates: any = {}
+
+            switch (newStatus) {
+              case 'pending':
+                updates.approved = false
+                updates.finished = true
+                break
+              case 'in_progress':
+                updates.approved = false
+                updates.finished = false
+                break
+              case 'approved':
+                updates.approved = true
+                updates.finished = true
+                break
+            }
+
+            await updateDoc(doc(fb.db, 'abattoir_reports', docId), updates)
+            results.success.push(docId)
+
+            // Emit stats update for each successful update
+            emitReportStatsUpdate(REPORT_TYPES.ABATTOIR, newStatus === 'approved' ? 'approve' : newStatus === 'in_progress' ? 'in_progress' : 'pending', docId, this)
+          } catch (error) {
+            console.error(`Failed to update report ${docId}:`, error)
+            results.failed.push(docId)
+          }
+        }
+
+        this.successful += 1
+        return results
+      } finally {
+        this.loading = false
+      }
+    },
+
     // Export method with date filtering and no pagination limit
     async exportAbattoir(filters: {
       category: boolean,

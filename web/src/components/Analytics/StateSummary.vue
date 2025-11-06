@@ -305,15 +305,15 @@ export default defineComponent({
 
 <style>
 .pie {
-  @apply h-52;
-  @apply w-52;
+  height: 13rem; /* h-52 */
+  width: 13rem; /* w-52 */
   border-radius: 50%;
 }
 .pie::before {
-  content: ’;
-  @apply block;
+  content: '';
+  display: block;
   margin-left: 50%;
-  @apply h-full;
+  height: 100%;
   border-radius: 0 100% 100% 0 / 50%;
   background-color: inherit;
   transform-origin: left;

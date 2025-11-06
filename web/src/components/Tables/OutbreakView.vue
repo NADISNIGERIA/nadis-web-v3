@@ -2,12 +2,74 @@
 import { useOutbreak } from './../../stores/outbreak'
 import { computed, defineComponent, onMounted, ref, toRefs, watch } from 'vue'
 import OutbreakDeclineForm from './DeclineForm/OutbreakDeclineForm.vue'
+import BulkEditModal from './../BulkEditModal.vue'
 import useMonths from './../../composables/months'
 import { useToast } from './../../composables/toast'
 import { utils, writeFile } from 'xlsx'
+import {
+  BulkActionsToolbar,
+  createFindStateFunction,
+  createFixLocationFunction,
+  createGetDateFunction,
+  createSortedComputed
+} from './GenericDataTableView.vue'
+
+// Define TypeScript interface for Outbreak report
+interface OutbreakReport {
+  doc_id: string
+  created_at: number
+  disease_name?: string
+  outbreak_type?: string
+  outbreak_num?: string | number
+  other_diseases?: string
+  cluster_type?: string
+  cluster?: string | number
+  date?: {
+    occurred?: number
+    reported?: number
+    investigated?: number
+    final_diagnosis?: number
+  }
+  localty?: {
+    facility_type?: string
+    facility_name?: string
+  }
+  location?: {
+    lat: number
+    lng: number
+  }
+  species?: {
+    species_name?: string
+    species_type?: string
+  }
+  age?: string | number
+  sex?: string
+  production_system?: string
+  control_means?: Array<{name: string}>
+  basis_for_diagnosis?: string
+  number_of_animals?: {
+    total_animals?: number
+    cases?: number
+    deaths?: number
+    slaughter?: number
+    recovered?: number
+    destroyed?: number
+  }
+  was_outbreak_stopped?: string
+  vaccination?: {
+    vaccination_type?: string
+    vaccination_number?: string | number
+    source?: string
+    batch_no?: string
+    expiry_date?: number
+    was_vaccinated?: string
+  }
+  approved: boolean
+  finished: boolean
+}
 
 export default defineComponent({
-  components: { OutbreakDeclineForm },
+  components: { OutbreakDeclineForm, BulkEditModal, BulkActionsToolbar },
   props: {
     export_to_excel: Number,
     selected_category: String,
@@ -21,15 +83,64 @@ export default defineComponent({
       selected_state: selected_state
     } = toRefs(props)
     const months = ref(useMonths().months)
-    const action = ref('') as any
-    const value = ref([]) as any
     const doc_id = ref('')
     const decline_form = ref(false)
     const { success, error, warning } = useToast()
 
     const reporter_state = computed(() => useOutbreak().reporter_state)
-    const outbreak = computed(() => useOutbreak().outbreak) as any
+    const outbreak = computed(() => useOutbreak().outbreak as OutbreakReport[])
     const successful = computed(() => useOutbreak().successful)
+    const loading = computed(() => useOutbreak().loading)
+    const pagination = computed(() => useOutbreak().pagination)
+
+    // Vuetify data table state
+    const itemsPerPage = ref(20)
+    const selectedReports = ref<OutbreakReport[]>([])
+    const sortBy = ref<any[]>([{ key: 'created_at', order: 'desc' }])
+
+    const sortedOutbreak = computed(createSortedComputed(outbreak, sortBy))
+
+    // Define table headers with wider widths for long column names
+    const headers = ref([
+      { title: 'S/N', key: 'index', sortable: false, width: 60 },
+      { title: 'Created Date', key: 'created_at', sortable: true, width: 140 },
+      { title: 'Report State - LGA', key: 'state_lga', sortable: false, width: 180 },
+      { title: 'Disease Suspected', key: 'disease_name', sortable: true, width: 180 },
+      { title: 'Outbreak Type', key: 'outbreak_type', sortable: true, width: 150 },
+      { title: 'Outbreak Number', key: 'outbreak_num', sortable: false, width: 150 },
+      { title: 'Other Diseases', key: 'other_diseases', sortable: false, width: 180 },
+      { title: 'Is it a cluster?', key: 'cluster_type', sortable: false, width: 140 },
+      { title: 'Total Cluster', key: 'cluster', sortable: false, width: 130 },
+      { title: 'Dates - Occurred', key: 'date.occurred', sortable: false, width: 150 },
+      { title: 'Dates - Reported', key: 'date.reported', sortable: false, width: 150 },
+      { title: 'Dates - Investigated', key: 'date.investigated', sortable: false, width: 170 },
+      { title: 'Dates - Final Diagnosis', key: 'date.final_diagnosis', sortable: false, width: 180 },
+      { title: 'Locality (Facility) - Type', key: 'localty.facility_type', sortable: false, width: 200 },
+      { title: 'Locality (Facility) - Name', key: 'localty.facility_name', sortable: false, width: 200 },
+      { title: 'Location - Lat', key: 'location.lat', sortable: false, width: 130 },
+      { title: 'Location - Lng', key: 'location.lng', sortable: false, width: 130 },
+      { title: 'Animals Affected - Species Name', key: 'species.species_name', sortable: false, width: 220 },
+      { title: 'Animals Affected - Species Type', key: 'species.species_type', sortable: false, width: 220 },
+      { title: 'Age Group in weeks', key: 'age', sortable: false, width: 160 },
+      { title: 'Sex', key: 'sex', sortable: false, width: 80 },
+      { title: 'Production System', key: 'production_system', sortable: false, width: 170 },
+      { title: 'Control Means', key: 'control_means', sortable: false, width: 200 },
+      { title: 'Basis for Diagnosis', key: 'basis_for_diagnosis', sortable: false, width: 180 },
+      { title: 'Animals Susceptible', key: 'number_of_animals.total_animals', sortable: false, width: 180 },
+      { title: 'Number of Animals - Cases', key: 'number_of_animals.cases', sortable: false, width: 200 },
+      { title: 'Number of Animals - Deaths', key: 'number_of_animals.deaths', sortable: false, width: 200 },
+      { title: 'Number of Animals - Slaughter', key: 'number_of_animals.slaughter', sortable: false, width: 220 },
+      { title: 'Number of Animals - Recovered', key: 'number_of_animals.recovered', sortable: false, width: 220 },
+      { title: 'Number of Animals - Destroyed', key: 'number_of_animals.destroyed', sortable: false, width: 220 },
+      { title: 'Outbreak Stopped', key: 'was_outbreak_stopped', sortable: false, width: 160 },
+      { title: 'Vaccination Type', key: 'vaccination.vaccination_type', sortable: false, width: 170 },
+      { title: 'Vaccination - Vaccination Number', key: 'vaccination.vaccination_number', sortable: false, width: 240 },
+      { title: 'Vaccination - Source', key: 'vaccination.source', sortable: false, width: 180 },
+      { title: 'Vaccination - Batch Number', key: 'vaccination.batch_no', sortable: false, width: 220 },
+      { title: 'Expiry Date', key: 'vaccination.expiry_date', sortable: false, width: 140 },
+      { title: 'Vaccination - Was Vaccinated', key: 'vaccination.was_vaccinated', sortable: false, width: 220 },
+      { title: 'Action', key: 'actions', sortable: false, width: 180 }
+    ])
 
     watch(selected_category, () => {
       getOutbreak()
@@ -39,12 +150,6 @@ export default defineComponent({
     })
     watch(successful, () => {
       getOutbreak()
-    })
-    watch(action, () => {
-      performAction()
-    })
-    watch(outbreak, () => {
-      outbreak_count()
     })
     watch(export_to_excel, () => {
       exportTableToExcel()
@@ -71,61 +176,60 @@ export default defineComponent({
       }
       useOutbreak().getOutbreak(values)
     }
-    const getDate = (val: any) => {
-      if (!val) return 'Invalid Date'
-      var month = new Date(val).getMonth()
-      var day = new Date(val).getDate()
-      var year = new Date(val).getFullYear()
-      
-      // Safety check for months array
-      if (!months.value || !months.value[month]) {
-        return 'Invalid Date'
+
+    const loadNextPage = () => {
+      let sort = 1
+      let progress = false
+      if (selected_category.value == 'Approved') {
+        sort = 1
+        progress = false
+      } else if (selected_category.value == 'Pending') {
+        sort = 0
+        progress = false
+      } else if (selected_category.value == 'In Progress') {
+        sort = 0
+        progress = true
       }
-      
-      return months.value[month].short + ' ' + day + ', ' + year
-    }
-    const fixLocation = (val: any) => {
-      if (val !== undefined) {
-        return val.toFixed(6)
-      } else {
-        return 'Unable to get location.'
+
+      const values = {
+        category: sort,
+        state: selected_state.value,
+        in_progress: progress
       }
-    }
-    const performAction = () => {
-      if (action.value != '') {
-        var index = action.value.match(/\d+/)[0]
-        if (index >= 0) {
-          const document_id = outbreak.value[index].doc_id
-          if (action.value == 'in_progress_' + index) {
-            useOutbreak().in_progress(document_id)
-          } else if (action.value == 'approve_' + index) {
-            useOutbreak().approve(document_id)
-          } else if (action.value == 'pending_' + index) {
-            useOutbreak().pending(document_id)
-          } else if (action.value == 'decline_' + index) {
-            declineForm(document_id)
-          }
-        }
-        action.value = ''
+
+      if (pagination.value.hasMore && !loading.value) {
+        useOutbreak().loadNextPage(values)
       }
     }
-    const outbreak_count = () => {
-      value.value = []
-      const count = outbreak.value.length
-      for (let val = 0; val < count; val++) {
-        value.value.push(0)
+
+    const getDate = createGetDateFunction(months)
+    const fixLocation = createFixLocationFunction()
+
+    const performAction = (action: string, docId: string) => {
+      if (action === 'in_progress') {
+        useOutbreak().in_progress(docId)
+      } else if (action === 'approve') {
+        useOutbreak().approve(docId)
+      } else if (action === 'pending') {
+        useOutbreak().pending(docId)
+      } else if (action === 'decline') {
+        declineForm(docId)
       }
     }
+
     const declineForm = (id: string) => {
       decline_form.value = true
       doc_id.value = id
     }
+
+    const closeModal = () => {
+      decline_form.value = false
+    }
+
     const exportTableToExcel = async () => {
       try {
-        // Get export filters from global state (set by ReportsPage)
         const exportFilters = (window as any).exportFilters || {}
-        
-        // Prepare filters for the export method
+
         const filters = {
           category: selected_category.value === 'Approved',
           state: selected_state.value || 'All States',
@@ -134,15 +238,13 @@ export default defineComponent({
           endDate: exportFilters.endDate
         }
 
-        // Fetch filtered data from store (no pagination limits)
         const exportData = await useOutbreak().exportOutbreak(filters)
-        
+
         if (exportData.length === 0) {
           warning('No outbreak reports found matching your selected filters. Try adjusting your date range or filters.')
           return
         }
 
-        // Prepare headers
         const headers = [
           'Date Reported',
           'State',
@@ -154,7 +256,6 @@ export default defineComponent({
           'Reporter'
         ]
 
-        // Prepare data rows
         const rows = exportData.map((item: any) => {
           const reporterState = findState(item.doc_id)
           return [
@@ -169,26 +270,21 @@ export default defineComponent({
           ]
         })
 
-        // Combine headers and data
         const worksheetData = [headers, ...rows]
-        
-        // Generate base filename
+
         let baseFilename = `${selected_category.value || 'All'}_Outbreak_Reports`
         if (exportFilters.startDate || exportFilters.endDate) {
           baseFilename += '_Filtered'
         }
         baseFilename += `_${Date.now()}`
 
-        // Export based on selected format
         const format = exportFilters.format || 'excel'
-        
+
         if (format === 'csv') {
-          // Create CSV content
-          const csvContent = worksheetData.map(row => 
+          const csvContent = worksheetData.map(row =>
             row.map(cell => `"${String(cell).replace(/"/g, '""')}"`).join(',')
           ).join('\n')
-          
-          // Create and download CSV
+
           const blob = new Blob([csvContent], { type: 'text/csv;charset=utf-8;' })
           const link = document.createElement('a')
           link.href = URL.createObjectURL(blob)
@@ -196,7 +292,6 @@ export default defineComponent({
           link.click()
           URL.revokeObjectURL(link.href)
         } else if (format === 'pdf') {
-          // Create HTML content for PDF printing
           const htmlContent = `
             <html>
               <head>
@@ -214,15 +309,15 @@ export default defineComponent({
                 <div class="header">
                   <h2>Outbreak Reports - ${selected_category.value || 'All'}</h2>
                   <p>Generated on: ${new Date().toLocaleString()}</p>
-                  ${exportFilters.startDate || exportFilters.endDate ? 
-                    `<p>Date Range: ${exportFilters.startDate || 'No start'} to ${exportFilters.endDate || 'No end'}</p>` : 
+                  ${exportFilters.startDate || exportFilters.endDate ?
+                    `<p>Date Range: ${exportFilters.startDate || 'No start'} to ${exportFilters.endDate || 'No end'}</p>` :
                     '<p>Date Range: All dates</p>'
                   }
                   <p>Total Records: ${exportData.length}</p>
                 </div>
                 <table>
-                  ${worksheetData.map((row, index) => 
-                    `<tr>${row.map(cell => 
+                  ${worksheetData.map((row, index) =>
+                    `<tr>${row.map(cell =>
                       index === 0 ? `<th>${cell}</th>` : `<td>${cell}</td>`
                     ).join('')}</tr>`
                   ).join('')}
@@ -230,7 +325,7 @@ export default defineComponent({
               </body>
             </html>
           `
-          
+
           const printWindow = window.open('', '_blank')
           if (printWindow) {
             printWindow.document.write(htmlContent)
@@ -238,481 +333,283 @@ export default defineComponent({
             printWindow.print()
           }
         } else {
-          // Default to Excel format
           const workbook = utils.book_new()
           const worksheet = utils.aoa_to_sheet(worksheetData)
           utils.book_append_sheet(workbook, worksheet, 'Outbreak Reports')
           writeFile(workbook, `${baseFilename}.xlsx`)
-        }        success(`Successfully exported ${exportData.length} outbreak reports to ${format === 'csv' ? 'CSV' : format === 'pdf' ? 'PDF' : 'Excel'}.`)
+        }
+
+        success(`Successfully exported ${exportData.length} outbreak reports to ${format === 'csv' ? 'CSV' : format === 'pdf' ? 'PDF' : 'Excel'}.`)
       } catch (exportError) {
         console.error('Error exporting outbreak data:', exportError)
         error('Failed to export outbreak reports. Please try again or contact support if the issue persists.')
       }
     }
-    const closeModal = () => {
-      decline_form.value = false
-    }
-    const findState = (doc_id: any) => {
-      const found_reporter = reporter_state.value.find(
-        (reporter: any) => reporter.doc_id === doc_id
-      )
-      if (found_reporter != undefined) {
-        return found_reporter.state_lga
-      } else {
-        return { state: 'null', local_govt: 'null' }
+
+    const findState = createFindStateFunction(reporter_state)
+
+    // Bulk actions
+    const handleBulkAction = async (action: string) => {
+      if (selectedReports.value.length === 0) {
+        warning('Please select at least one report')
+        return
+      }
+
+      const docIds = selectedReports.value.map(report => report.doc_id)
+      const result = await useOutbreak().bulkUpdateStatus(docIds, action as any)
+
+      if (result.success.length > 0) {
+        success(`Successfully updated ${result.success.length} reports`)
+        selectedReports.value = []
+        getOutbreak()
+      }
+
+      if (result.failed.length > 0) {
+        error(`Failed to update ${result.failed.length} reports`)
       }
     }
 
     onMounted(() => {
       getOutbreak()
-      outbreak_count()
     })
 
-    return { outbreak, action, doc_id, decline_form, getDate, findState, fixLocation, closeModal }
+    return {
+      outbreak,
+      sortedOutbreak,
+      decline_form,
+      doc_id,
+      headers,
+      itemsPerPage,
+      selectedReports,
+      sortBy,
+      getDate,
+      findState,
+      fixLocation,
+      closeModal,
+      loading,
+      pagination,
+      loadNextPage,
+      performAction,
+      handleBulkAction
+    }
   }
 })
 </script>
 
 <template>
   <div>
-    <div class="w-full overflow-x-auto">
-      <table class="w-6500 mb-10" id="outbreak_to_excel">
-        <tr class="grid mt-8 mb-1 text-cool-gray-500 text-sm grid-cols-102">
-          <th
-            class="col-span-1 bg-card-8 rounded-tl-md border-r border-cool-gray-200 px-3 py-3 shadow-md"
-          >
-            S/N
-          </th>
-          <th class="col-span-2 bg-card-8 border-r border-cool-gray-200 px-3 py-3 shadow-md">
-            Created Date
-          </th>
-          <th class="col-span-2 bg-card-8 border-r border-cool-gray-200 px-3 py-3 shadow-md">
-            Report State / LGA
-          </th>
-          <th class="col-span-3 bg-card-8 border-r border-cool-gray-200 px-3 py-3 shadow-md">
-            Disease Suspected
-          </th>
-          <th class="col-span-3 bg-card-8 border-r border-cool-gray-200 px-3 py-3 shadow-md">
-            Outbreak Type
-          </th>
-          <th class="col-span-3 bg-card-8 border-r border-cool-gray-200 px-3 py-3 shadow-md">
-            Outbreak Number
-          </th>
-          <th class="col-span-3 bg-card-8 border-r border-cool-gray-200 px-3 py-3 shadow-md">
-            Other Diseases
-          </th>
-          <th class="col-span-2 bg-card-8 border-r border-cool-gray-200 px-3 py-3 shadow-md">
-            Is it a cluster?
-          </th>
-          <th class="col-span-2 bg-card-8 border-r border-cool-gray-200 px-3 py-3 shadow-md">
-            Total Cluster
-          </th>
-          <th class="col-span-3 bg-card-8 border-r border-cool-gray-200 px-3 py-3 shadow-md">
-            Dates /
-            <span>Occurred</span>
-          </th>
-          <th class="col-span-3 bg-card-8 border-r border-cool-gray-200 px-3 py-3 shadow-md">
-            Dates /
-            <span>Reported</span>
-          </th>
-          <th class="col-span-3 bg-card-8 border-r border-cool-gray-200 px-3 py-3 shadow-md">
-            Dates /
-            <span>Investigated</span>
-          </th>
-          <th class="col-span-3 bg-card-8 border-r border-cool-gray-200 px-3 py-3 shadow-md">
-            Dates /
-            <span>Final Diagnosis</span>
-          </th>
-          <th class="col-span-3 bg-card-8 border-r border-cool-gray-200 px-3 py-3 shadow-md">
-            Locality (Facility) /
-            <span>Type</span>
-          </th>
-          <th class="col-span-3 bg-card-8 border-r border-cool-gray-200 px-3 py-3 shadow-md">
-            Locality (Facility) /
-            <span>Name</span>
-          </th>
-          <th class="col-span-2 bg-card-8 border-r border-cool-gray-200 px-3 py-3 shadow-md">
-            Location /
-            <span>Lat</span>
-          </th>
-          <th class="col-span-2 bg-card-8 border-r border-cool-gray-200 px-3 py-3 shadow-md">
-            Location /
-            <span>Lng</span>
-          </th>
-          <th class="col-span-3 bg-card-8 border-r border-cool-gray-200 px-3 py-3 shadow-md">
-            Animals Affected /
-            <span>Species Name</span>
-          </th>
-          <th class="col-span-3 bg-card-8 border-r border-cool-gray-200 px-3 py-3 shadow-md">
-            Animals Affected /
-            <span>Species Type</span>
-          </th>
+    <BulkActionsToolbar
+      :selected-reports="selectedReports"
+      @bulk-action="handleBulkAction"
+      @clear-selection="selectedReports = []"
+    />
 
-          <th class="col-span-2 bg-card-8 border-r border-cool-gray-200 px-3 py-3 shadow-md">
-            Age Group in weeks
-          </th>
-          <th class="col-span-2 bg-card-8 border-r border-cool-gray-200 px-3 py-3 shadow-md">
-            Sex
-          </th>
-          <th class="col-span-2 bg-card-8 border-r border-cool-gray-200 px-3 py-3 shadow-md">
-            Production System
-          </th>
-          <th class="col-span-3 bg-card-8 border-r border-cool-gray-200 px-3 py-3 shadow-md">
-            Control Means
-          </th>
-          <th class="col-span-3 bg-card-8 border-r border-cool-gray-200 px-3 py-3 shadow-md">
-            Basis for Diagnosis
-          </th>
-          <th class="col-span-3 bg-card-8 border-r border-cool-gray-200 px-3 py-3 shadow-md">
-            Number of Animals /
-            <span>Susceptible</span>
-          </th>
-          <th class="col-span-3 bg-card-8 border-r border-cool-gray-200 px-3 py-3 shadow-md">
-            Number of Animals /
-            <span>Cases</span>
-          </th>
-          <th class="col-span-3 bg-card-8 border-r border-cool-gray-200 px-3 py-3 shadow-md">
-            Number of Animals /
-            <span>Deaths</span>
-          </th>
-          <th class="col-span-3 bg-card-8 border-r border-cool-gray-200 px-3 py-3 shadow-md">
-            Number of Animals /
-            <span>Slaughter</span>
-          </th>
-          <th class="col-span-3 bg-card-8 border-r border-cool-gray-200 px-3 py-3 shadow-md">
-            Number of Animals /
-            <span>Recovered</span>
-          </th>
-          <th class="col-span-3 bg-card-8 border-r border-cool-gray-200 px-3 py-3 shadow-md">
-            Number of Animals /
-            <span>Destroyed</span>
-          </th>
-          <th class="col-span-2 bg-card-8 border-r border-cool-gray-200 px-3 py-3 shadow-md">
-            Outbreak Stopped
-          </th>
-          <th class="col-span-3 bg-card-8 border-r border-cool-gray-200 px-3 py-3 shadow-md">
-            Vaccination /
-            <span>Vaccination Type</span>
-          </th>
-          <th class="col-span-3 bg-card-8 border-r border-cool-gray-200 px-3 py-3 shadow-md">
-            Vaccination /
-            <span>vaccination Number</span>
-          </th>
-          <th class="col-span-3 bg-card-8 border-r border-cool-gray-200 px-3 py-3 shadow-md">
-            Vaccination /
-            <span>Source</span>
-          </th>
-          <th class="col-span-3 bg-card-8 border-r border-cool-gray-200 px-3 py-3 shadow-md">
-            Vaccination /
-            <span>Batch Number</span>
-          </th>
-          <th class="col-span-3 bg-card-8 border-r border-cool-gray-200 px-3 py-3 shadow-md">
-            Vaccination /
-            <span>Expiry Date</span>
-          </th>
-          <th class="col-span-3 bg-card-8 border-r border-cool-gray-200 px-3 py-3 shadow-md">
-            Vaccination /
-            <span>Was Vaccinated</span>
-          </th>
-          <th
-            class="col-span-3 bg-card-8 border-r border-cool-gray-200 px-3 py-3 shadow-md text-center"
+    <!-- Vuetify Data Table -->
+    <v-data-table
+      v-model="selectedReports"
+      v-model:items-per-page="itemsPerPage"
+      v-model:sort-by="sortBy"
+      :headers="headers"
+      :items="sortedOutbreak"
+      :loading="loading"
+      show-select
+      return-object
+      item-value="doc_id"
+      class="elevation-1"
+      fixed-header
+      height="600px"
+    >
+      <!-- Serial Number Column -->
+      <template v-slot:item.index="{ index }">
+        {{ index + 1 }}
+      </template>
+
+      <!-- Created Date Column -->
+      <template v-slot:item.created_at="{ item }">
+        {{ getDate(item.created_at) }}
+      </template>
+
+      <!-- State/LGA Column -->
+      <template v-slot:item.state_lga="{ item }">
+        {{ findState(item.doc_id).state }} / {{ findState(item.doc_id).local_govt }}
+      </template>
+
+      <!-- Date Occurred -->
+      <template v-slot:item.date.occurred="{ item }">
+        {{ item.date?.occurred ? getDate(item.date.occurred) : 'N/A' }}
+      </template>
+
+      <!-- Date Reported -->
+      <template v-slot:item.date.reported="{ item }">
+        {{ item.date?.reported ? getDate(item.date.reported) : 'N/A' }}
+      </template>
+
+      <!-- Date Investigated -->
+      <template v-slot:item.date.investigated="{ item }">
+        {{ item.date?.investigated ? getDate(item.date.investigated) : 'N/A' }}
+      </template>
+
+      <!-- Date Final Diagnosis -->
+      <template v-slot:item.date.final_diagnosis="{ item }">
+        {{ item.date?.final_diagnosis ? getDate(item.date.final_diagnosis) : 'N/A' }}
+      </template>
+
+      <!-- Facility Type -->
+      <template v-slot:item.localty.facility_type="{ item }">
+        {{ item.localty?.facility_type || 'N/A' }}
+      </template>
+
+      <!-- Facility Name -->
+      <template v-slot:item.localty.facility_name="{ item }">
+        {{ item.localty?.facility_name || 'N/A' }}
+      </template>
+
+      <!-- Location Latitude -->
+      <template v-slot:item.location.lat="{ item }">
+        {{ item.location ? fixLocation(item.location.lat) : 'N/A' }}
+      </template>
+
+      <!-- Location Longitude -->
+      <template v-slot:item.location.lng="{ item }">
+        {{ item.location ? fixLocation(item.location.lng) : 'N/A' }}
+      </template>
+
+      <!-- Species Name -->
+      <template v-slot:item.species.species_name="{ item }">
+        {{ item.species?.species_name || 'N/A' }}
+      </template>
+
+      <!-- Species Type -->
+      <template v-slot:item.species.species_type="{ item }">
+        {{ item.species?.species_type || 'N/A' }}
+      </template>
+
+      <!-- Control Means -->
+      <template v-slot:item.control_means="{ item }">
+        <v-select
+          v-if="item.control_means?.length"
+          :model-value="item.control_means[0]?.name"
+          :items="item.control_means.map((c: any) => c.name)"
+          density="default"
+          variant="outlined"
+          hide-details
+        ></v-select>
+        <span v-else>N/A</span>
+      </template>
+
+      <!-- Number of Animals - Total -->
+      <template v-slot:item.number_of_animals.total_animals="{ item }">
+        {{ item.number_of_animals?.total_animals || 'N/A' }}
+      </template>
+
+      <!-- Number of Animals - Cases -->
+      <template v-slot:item.number_of_animals.cases="{ item }">
+        {{ item.number_of_animals?.cases || 'N/A' }}
+      </template>
+
+      <!-- Number of Animals - Deaths -->
+      <template v-slot:item.number_of_animals.deaths="{ item }">
+        {{ item.number_of_animals?.deaths || 'N/A' }}
+      </template>
+
+      <!-- Number of Animals - Slaughter -->
+      <template v-slot:item.number_of_animals.slaughter="{ item }">
+        {{ item.number_of_animals?.slaughter || 'N/A' }}
+      </template>
+
+      <!-- Number of Animals - Recovered -->
+      <template v-slot:item.number_of_animals.recovered="{ item }">
+        {{ item.number_of_animals?.recovered || 'N/A' }}
+      </template>
+
+      <!-- Number of Animals - Destroyed -->
+      <template v-slot:item.number_of_animals.destroyed="{ item }">
+        {{ item.number_of_animals?.destroyed || 'N/A' }}
+      </template>
+
+      <!-- Vaccination Type -->
+      <template v-slot:item.vaccination.vaccination_type="{ item }">
+        {{ item.vaccination?.vaccination_type || 'N/A' }}
+      </template>
+
+      <!-- Vaccination Number -->
+      <template v-slot:item.vaccination.vaccination_number="{ item }">
+        {{ item.vaccination?.vaccination_number || 'N/A' }}
+      </template>
+
+      <!-- Vaccination Source -->
+      <template v-slot:item.vaccination.source="{ item }">
+        {{ item.vaccination?.source || 'N/A' }}
+      </template>
+
+      <!-- Batch Number -->
+      <template v-slot:item.vaccination.batch_no="{ item }">
+        {{ item.vaccination?.batch_no || 'N/A' }}
+      </template>
+
+      <!-- Expiry Date -->
+      <template v-slot:item.vaccination.expiry_date="{ item }">
+        {{ item.vaccination?.expiry_date ? getDate(item.vaccination.expiry_date) : 'N/A' }}
+      </template>
+
+      <!-- Was Vaccinated -->
+      <template v-slot:item.vaccination.was_vaccinated="{ item }">
+        {{ item.vaccination?.was_vaccinated || 'N/A' }}
+      </template>
+
+      <!-- Actions Column -->
+      <template v-slot:item.actions="{ item }">
+        <v-select
+          :items="[
+            { title: '-- Select Action --', value: '' },
+            ...(item.finished ? [{ title: 'In Progress', value: 'in_progress' }] : []),
+            ...(!item.approved ? [{ title: 'Approve', value: 'approve' }] : []),
+            ...(item.approved ? [{ title: 'Pending', value: 'pending' }] : []),
+            ...(item.finished ? [{ title: 'Decline', value: 'decline' }] : [])
+          ]"
+          density="compact"
+          variant="outlined"
+          hide-details
+          :model-value="''"
+          @update:model-value="(value: string) => value && performAction(value, item.doc_id)"
+        ></v-select>
+      </template>
+
+      <!-- Loading Slot -->
+      <template v-slot:loading>
+        <v-skeleton-loader type="table-row@10"></v-skeleton-loader>
+      </template>
+
+      <!-- No Data Slot -->
+      <template v-slot:no-data>
+        <div class="text-center py-8">
+          <div class="text-gray-500 text-lg">No reports found</div>
+          <div class="text-gray-400 text-sm mt-2">
+            Try adjusting your filters or check back later
+          </div>
+        </div>
+      </template>
+
+      <!-- Bottom Slot for Load More -->
+      <template v-slot:bottom>
+        <div class="text-center pa-4">
+          <v-btn
+            v-if="pagination.hasMore"
+            @click="loadNextPage"
+            :loading="loading"
+            color="primary"
+            variant="outlined"
           >
-            Action
-          </th>
-        </tr>
-        <tr
-          class="grid text-cool-gray-500 w-6500 text-sm grid-cols-102"
-          v-for="(result, index) in outbreak"
-          :key="index"
-        >
-          <td
-            class="col-span-1 bg-card-8 border-r border-t border-cool-gray-200 text-cool-gray-700 px-3 py-3"
-          >
-            {{ index + 1 }}
-          </td>
-          <td
-            class="col-span-2 bg-card-8 border-r border-t border-cool-gray-200 text-cool-gray-700 px-3 py-3"
-          >
-            {{ getDate(result.created_at) }}
-          </td>
-          <td
-            class="col-span-2 bg-card-8 border-r border-t border-cool-gray-200 text-cool-gray-700 px-3 py-3"
-          >
-            {{ findState(result.doc_id).state + ' / ' + findState(result.doc_id).local_govt }}
-          </td>
-          <td
-            class="col-span-3 bg-card-8 border-r border-t border-cool-gray-200 text-cool-gray-700 px-3 py-3"
-          >
-            {{ result.disease_name }}
-          </td>
-          <td
-            class="col-span-3 bg-card-8 border-r border-t border-cool-gray-200 text-cool-gray-700 px-3 py-3"
-          >
-            {{ result.outbreak_type }}
-          </td>
-          <td
-            class="col-span-3 bg-card-8 border-r border-t border-cool-gray-200 text-cool-gray-700 px-3 py-3"
-          >
-            {{ result.outbreak_num }}
-          </td>
-          <td
-            class="col-span-3 bg-card-8 border-r border-t border-cool-gray-200 text-cool-gray-700 px-3 py-3"
-          >
-            {{ result.other_diseases }}
-          </td>
-          <td
-            class="col-span-2 bg-card-8 border-r border-t border-cool-gray-200 text-cool-gray-700 px-3 py-3"
-          >
-            {{ result.cluster_type }}
-          </td>
-          <td
-            class="col-span-2 bg-card-8 border-r border-t border-cool-gray-200 text-cool-gray-700 px-3 py-3"
-          >
-            {{ result.cluster }}
-          </td>
-          <td
-            class="col-span-3 bg-card-8 border-r border-t border-cool-gray-200 text-cool-gray-700 px-3 py-3"
-          >
-            {{ result.date ? (result.date.occurred ? getDate(result.date.occurred) : '') : '' }}
-          </td>
-          <td
-            class="col-span-3 bg-card-8 border-r border-t border-cool-gray-200 text-cool-gray-700 px-3 py-3"
-          >
-            {{ result.date ? (result.date.reported ? getDate(result.date.reported) : '') : '' }}
-          </td>
-          <td
-            class="col-span-3 bg-card-8 border-r border-t border-cool-gray-200 text-cool-gray-700 px-3 py-3"
-          >
-            {{
-              result.date ? (result.date.investigated ? getDate(result.date.investigated) : '') : ''
-            }}
-          </td>
-          <td
-            class="col-span-3 bg-card-8 border-r border-t border-cool-gray-200 text-cool-gray-700 px-3 py-3"
-          >
-            {{
-              result.date
-                ? result.date.final_diagnosis
-                  ? getDate(result.date.final_diagnosis)
-                  : ''
-                : ''
-            }}
-          </td>
-          <td
-            class="col-span-3 bg-card-8 border-r border-t border-cool-gray-200 text-cool-gray-700 px-3 py-3"
-          >
-            {{ result.localty ? result.localty.facility_type : '' }}
-          </td>
-          <td
-            class="col-span-3 bg-card-8 border-r border-t border-cool-gray-200 text-cool-gray-700 px-3 py-3"
-          >
-            {{ result.localty ? result.localty.facility_name : '' }}
-          </td>
-          <td
-            class="col-span-2 bg-card-8 border-r border-t border-cool-gray-200 text-cool-gray-700 px-3 py-3"
-          >
-            {{ result.location ? fixLocation(result.location.lat) : '' }}
-          </td>
-          <td
-            class="col-span-2 bg-card-8 border-r border-t border-cool-gray-200 text-cool-gray-700 px-3 py-3"
-          >
-            {{ result.location ? fixLocation(result.location.lng) : '' }}
-          </td>
-          <td
-            class="col-span-3 bg-card-8 border-r border-t border-cool-gray-200 text-cool-gray-700 px-3 py-3"
-          >
-            {{
-              result.species ? (result.species.species_name ? result.species.species_name : '') : ''
-            }}
-          </td>
-          <td
-            class="col-span-3 bg-card-8 border-r border-t border-cool-gray-200 text-cool-gray-700 px-3 py-3"
-          >
-            {{
-              result.species ? (result.species.species_type ? result.species.species_type : '') : ''
-            }}
-          </td>
-          <td
-            class="col-span-2 bg-card-8 border-r border-t border-cool-gray-200 text-cool-gray-700 px-3 py-3"
-          >
-            {{ result.age ? result.age : '' }}
-          </td>
-          <td
-            class="col-span-2 bg-card-8 border-r border-t border-cool-gray-200 text-cool-gray-700 px-3 py-3"
-          >
-            {{ result.sex ? result.sex : '' }}
-          </td>
-          <td
-            class="col-span-2 bg-card-8 border-r border-t border-cool-gray-200 text-cool-gray-700 px-3 py-3"
-          >
-            {{ result.production_system ? result.production_system : '' }}
-          </td>
-          <td
-            class="col-span-3 bg-card-8 border-r border-t border-cool-gray-200 text-cool-gray-700 px-3 py-3"
-          >
-            <select class="w-full py-1 bg-card-8 border-gray-200 focus:outline-none">
-              <option
-                v-for="(control, index) in result.control_means ? result.control_means : ''"
-                :key="index"
-              >
-                {{ control.name }}
-              </option>
-            </select>
-          </td>
-          <td
-            class="col-span-3 bg-card-8 border-r border-t border-cool-gray-200 text-cool-gray-700 px-3 py-3"
-          >
-            {{ result.basis_for_diagnosis ? result.basis_for_diagnosis : '' }}
-          </td>
-          <td
-            class="col-span-3 bg-card-8 border-r border-t border-cool-gray-200 text-cool-gray-700 px-3 py-3"
-          >
-            {{
-              result.number_of_animals
-                ? result.number_of_animals.total_animals
-                  ? result.number_of_animals.total_animals
-                  : ''
-                : ''
-            }}
-          </td>
-          <td
-            class="col-span-3 bg-card-8 border-r border-t border-cool-gray-200 text-cool-gray-700 px-3 py-3"
-          >
-            {{
-              result.number_of_animals
-                ? result.number_of_animals.cases
-                  ? result.number_of_animals.cases
-                  : ''
-                : ''
-            }}
-          </td>
-          <td
-            class="col-span-3 bg-card-8 border-r border-t border-cool-gray-200 text-cool-gray-700 px-3 py-3"
-          >
-            {{
-              result.number_of_animals
-                ? result.number_of_animals.deaths
-                  ? result.number_of_animals.deaths
-                  : ''
-                : ''
-            }}
-          </td>
-          <td
-            class="col-span-3 bg-card-8 border-r border-t border-cool-gray-200 text-cool-gray-700 px-3 py-3"
-          >
-            {{
-              result.number_of_animals
-                ? result.number_of_animals.slaughter
-                  ? result.number_of_animals.slaughter
-                  : ''
-                : ''
-            }}
-          </td>
-          <td
-            class="col-span-3 bg-card-8 border-r border-t border-cool-gray-200 text-cool-gray-700 px-3 py-3"
-          >
-            {{
-              result.number_of_animals
-                ? result.number_of_animals.recovered
-                  ? result.number_of_animals.recovered
-                  : ''
-                : ''
-            }}
-          </td>
-          <td
-            class="col-span-3 bg-card-8 border-r border-t border-cool-gray-200 text-cool-gray-700 px-3 py-3"
-          >
-            {{
-              result.number_of_animals
-                ? result.number_of_animals.destroyed
-                  ? result.number_of_animals.destroyed
-                  : ''
-                : ''
-            }}
-          </td>
-          <td
-            class="col-span-2 bg-card-8 border-r border-t border-cool-gray-200 text-cool-gray-700 px-3 py-3"
-          >
-            {{ result.was_outbreak_stopped ? result.was_outbreak_stopped : '' }}
-          </td>
-          <td
-            class="col-span-3 bg-card-8 border-r border-t border-cool-gray-200 text-cool-gray-700 px-3 py-3"
-          >
-            {{
-              result.vaccination != undefined
-                ? result.vaccination.vaccination_type
-                  ? result.vaccination.vaccination_type
-                  : ''
-                : ''
-            }}
-          </td>
-          <td
-            class="col-span-3 bg-card-8 border-r border-t border-cool-gray-200 text-cool-gray-700 px-3 py-3"
-          >
-            {{
-              result.vaccination != undefined
-                ? result.vaccination.vaccination_number
-                  ? result.vaccination.vaccination_number
-                  : ''
-                : ''
-            }}
-          </td>
-          <td
-            class="col-span-3 bg-card-8 border-r border-t border-cool-gray-200 text-cool-gray-700 px-3 py-3"
-          >
-            {{
-              result.vaccination != undefined
-                ? result.vaccination.source
-                  ? result.vaccination.source
-                  : ''
-                : ''
-            }}
-          </td>
-          <td
-            class="col-span-3 bg-card-8 border-r border-t border-cool-gray-200 text-cool-gray-700 px-3 py-3"
-          >
-            {{
-              result.vaccination != undefined
-                ? result.vaccination.batch_no
-                  ? result.vaccination.batch_no
-                  : ''
-                : ''
-            }}
-          </td>
-          <td
-            class="col-span-3 bg-card-8 border-r border-t border-cool-gray-200 text-cool-gray-700 px-3 py-3"
-          >
-            {{
-              result.vaccination
-                ? result.vaccination.expiry_date
-                  ? getDate(result.vaccination.expiry_date)
-                  : ''
-                : ''
-            }}
-          </td>
-          <td
-            class="col-span-3 bg-card-8 border-r border-t border-cool-gray-200 text-cool-gray-700 px-3 py-3"
-          >
-            {{
-              result.vaccination != undefined
-                ? result.vaccination.was_vaccinated
-                  ? result.vaccination.was_vaccinated
-                  : ''
-                : ''
-            }}
-          </td>
-          <td class="col-span-3 bg-card-8 border-r border-t border-cool-gray-200 px-3 py-3">
-            <select class="px-2 py-1 text-sm bg-card-8 focus:outline-none" v-model="action">
-              <option value="">-- Select Action --</option>
-              <option :value="'in_progress_' + index" v-if="result.finished">In Progress</option>
-              <option :value="'approve_' + index" v-if="!result.approved">Approve</option>
-              <option :value="'pending_' + index" v-if="result.approved">Pending</option>
-              <option :value="'decline_' + index" v-if="result.finished">Decline</option>
-            </select>
-          </td>
-        </tr>
-      </table>
-    </div>
+            Load More
+          </v-btn>
+          <div v-else class="text-sm text-gray-500">
+            All reports loaded ({{ outbreak.length }} total)
+          </div>
+        </div>
+      </template>
+    </v-data-table>
+
+    <!-- Decline Form Modal -->
     <outbreak-decline-form
       v-if="decline_form"
       :full="full"
@@ -722,11 +619,4 @@ export default defineComponent({
   </div>
 </template>
 
-<style scoped>
-.w-6500 {
-  width: 6500px;
-}
-.w-4000 {
-  width: 4000px;
-}
-</style>
+<style scoped src="./GenericDataTableStyles.css"></style>
