@@ -6,6 +6,13 @@ import BulkEditModal from './../BulkEditModal.vue'
 import useMonths from './../../composables/months'
 import { useToast } from './../../composables/toast'
 import { utils, writeFile } from 'xlsx'
+import {
+  BulkActionsToolbar,
+  createFindStateFunction,
+  createFixLocationFunction,
+  createGetDateFunction,
+  createSortedComputed
+} from './GenericDataTableView.vue'
 
 // Define TypeScript interface for Outbreak report
 interface OutbreakReport {
@@ -62,7 +69,7 @@ interface OutbreakReport {
 }
 
 export default defineComponent({
-  components: { OutbreakDeclineForm, BulkEditModal },
+  components: { OutbreakDeclineForm, BulkEditModal, BulkActionsToolbar },
   props: {
     export_to_excel: Number,
     selected_category: String,
@@ -78,7 +85,6 @@ export default defineComponent({
     const months = ref(useMonths().months)
     const doc_id = ref('')
     const decline_form = ref(false)
-    const showStatusDropdown = ref(false)
     const { success, error, warning } = useToast()
 
     const reporter_state = computed(() => useOutbreak().reporter_state)
@@ -87,49 +93,12 @@ export default defineComponent({
     const loading = computed(() => useOutbreak().loading)
     const pagination = computed(() => useOutbreak().pagination)
 
-    // Sorted outbreak data
-    const sortedOutbreak = computed(() => {
-      if (!sortBy.value || sortBy.value.length === 0) {
-        return outbreak.value
-      }
-
-      const sorted = [...outbreak.value]
-      const sortConfig = sortBy.value[0]
-
-      return sorted.sort((a: any, b: any) => {
-        let aVal = a[sortConfig.key]
-        let bVal = b[sortConfig.key]
-
-        // Handle nested properties (e.g., 'location.lat')
-        if (sortConfig.key.includes('.')) {
-          const keys = sortConfig.key.split('.')
-          aVal = keys.reduce((obj: any, key: any) => obj?.[key], a)
-          bVal = keys.reduce((obj: any, key: any) => obj?.[key], b)
-        }
-
-        // Handle undefined/null values
-        if (aVal == null && bVal == null) return 0
-        if (aVal == null) return 1
-        if (bVal == null) return -1
-
-        // Compare values
-        let comparison = 0
-        if (typeof aVal === 'string' && typeof bVal === 'string') {
-          comparison = aVal.localeCompare(bVal)
-        } else if (typeof aVal === 'number' && typeof bVal === 'number') {
-          comparison = aVal - bVal
-        } else {
-          comparison = String(aVal).localeCompare(String(bVal))
-        }
-
-        return sortConfig.order === 'asc' ? comparison : -comparison
-      })
-    })
-
     // Vuetify data table state
     const itemsPerPage = ref(20)
     const selectedReports = ref<OutbreakReport[]>([])
     const sortBy = ref<any[]>([{ key: 'created_at', order: 'desc' }])
+
+    const sortedOutbreak = computed(createSortedComputed(outbreak, sortBy))
 
     // Define table headers with wider widths for long column names
     const headers = ref([
@@ -233,21 +202,8 @@ export default defineComponent({
       }
     }
 
-    const getDate = (val: any) => {
-      if (!val) return 'N/A'
-      const month = new Date(val).getMonth()
-      const day = new Date(val).getDate()
-      const year = new Date(val).getFullYear()
-      return months.value[month].short + ' ' + day + ', ' + year
-    }
-
-    const fixLocation = (val: any) => {
-      if (val !== undefined) {
-        return val.toFixed(6)
-      } else {
-        return 'N/A'
-      }
-    }
+    const getDate = createGetDateFunction(months)
+    const fixLocation = createFixLocationFunction()
 
     const performAction = (action: string, docId: string) => {
       if (action === 'in_progress') {
@@ -390,16 +346,7 @@ export default defineComponent({
       }
     }
 
-    const findState = (doc_id: string) => {
-      const found_reporter = reporter_state.value.find(
-        (reporter: any) => reporter.doc_id === doc_id
-      )
-      if (found_reporter != undefined) {
-        return found_reporter.state_lga
-      } else {
-        return { state: 'null', local_govt: 'null' }
-      }
-    }
+    const findState = createFindStateFunction(reporter_state)
 
     // Bulk actions
     const handleBulkAction = async (action: string) => {
@@ -435,7 +382,6 @@ export default defineComponent({
       itemsPerPage,
       selectedReports,
       sortBy,
-      showStatusDropdown,
       getDate,
       findState,
       fixLocation,
@@ -452,58 +398,11 @@ export default defineComponent({
 
 <template>
   <div>
-    <!-- Bulk Actions Toolbar -->
-    <div v-if="selectedReports.length > 0" class="mb-4 p-4 bg-blue-50 rounded-lg flex items-center justify-between">
-      <span class="text-sm font-medium text-blue-900">
-        {{ selectedReports.length }} report(s) selected
-      </span>
-      <div class="flex gap-2 relative">
-        <div class="relative">
-          <button
-            @click="showStatusDropdown = !showStatusDropdown"
-            class="px-4 py-2 bg-primary hover:bg-primary-2 text-white rounded text-sm flex items-center gap-2"
-          >
-            Edit Status
-            <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-              <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M19 9l-7 7-7-7" />
-            </svg>
-          </button>
-          <!-- Dropdown Menu -->
-          <div
-            v-if="showStatusDropdown"
-            class="absolute top-full mt-1 bg-white border border-gray-300 rounded shadow-lg z-50 min-w-full"
-          >
-            <button
-              @click="handleBulkAction('pending'); showStatusDropdown = false"
-              class="w-full text-left px-4 py-2 text-sm hover:bg-yellow-50 text-gray-700 flex items-center gap-2"
-            >
-              <span class="w-2 h-2 rounded-full bg-yellow-500"></span>
-              Set to Pending
-            </button>
-            <button
-              @click="handleBulkAction('in_progress'); showStatusDropdown = false"
-              class="w-full text-left px-4 py-2 text-sm hover:bg-blue-50 text-gray-700 flex items-center gap-2"
-            >
-              <span class="w-2 h-2 rounded-full bg-blue-500"></span>
-              Set to In Progress
-            </button>
-            <button
-              @click="handleBulkAction('approved'); showStatusDropdown = false"
-              class="w-full text-left px-4 py-2 text-sm hover:bg-green-50 text-gray-700 flex items-center gap-2"
-            >
-              <span class="w-2 h-2 rounded-full bg-green-500"></span>
-              Set to Approved
-            </button>
-          </div>
-        </div>
-        <button
-          @click="selectedReports = []"
-          class="px-4 py-2 bg-gray-300 hover:bg-gray-400 text-gray-700 rounded text-sm"
-        >
-          Clear Selection
-        </button>
-      </div>
-    </div>
+    <BulkActionsToolbar
+      :selected-reports="selectedReports"
+      @bulk-action="handleBulkAction"
+      @clear-selection="selectedReports = []"
+    />
 
     <!-- Vuetify Data Table -->
     <v-data-table
@@ -720,51 +619,4 @@ export default defineComponent({
   </div>
 </template>
 
-<style scoped>
-/* Vuetify table customizations */
-:deep(.v-data-table) {
-  font-size: 0.875rem;
-  background-color: #EEFEF6;
-}
-
-:deep(.v-data-table-header) {
-  background-color: #EEFEF6 !important;
-}
-
-:deep(.v-data-table__td) {
-  padding: 8px 12px !important;
-  background-color: #EEFEF6 !important;
-}
-
-:deep(.v-data-table__th) {
-  padding: 12px !important;
-  font-weight: 600 !important;
-  color: #374151 !important;
-  background-color: #EEFEF6 !important;
-}
-
-:deep(thead) {
-  background-color: #EEFEF6 !important;
-}
-
-:deep(thead tr) {
-  background-color: #EEFEF6 !important;
-}
-
-:deep(thead th) {
-  background-color: #EEFEF6 !important;
-}
-
-:deep(.v-table__wrapper) {
-  overflow-x: auto;
-  background-color: #EEFEF6;
-}
-
-:deep(.v-data-table__tr) {
-  background-color: #EEFEF6;
-}
-
-:deep(.v-data-table__tr:hover) {
-  background-color: #d9f5e8 !important;
-}
-</style>
+<style scoped src="./GenericDataTableStyles.css"></style>

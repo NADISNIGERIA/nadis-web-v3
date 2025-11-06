@@ -1,0 +1,17 @@
+:deep(.v-data-table) {
+  font-size: 0.875rem;
+}
+
+:deep(.v-data-table__td) {
+  padding: 8px 12px !important;
+}
+
+:deep(.v-data-table__th) {
+  padding: 12px !important;
+  font-weight: 600 !important;
+  color: #374151 !important;
+}
+
+:deep(.v-table__wrapper) {
+  overflow-x: auto;
+}

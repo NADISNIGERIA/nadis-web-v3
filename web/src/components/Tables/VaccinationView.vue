@@ -2,14 +2,46 @@
 import { useVaccination } from './../../stores/vaccination'
 import { computed, defineComponent, onMounted, ref, toRefs, watch } from 'vue'
 import VaccinationDeclineForm from './DeclineForm/VaccinationDeclineForm.vue'
-import BulkEditModal from './../BulkEditModal.vue'
-import { useBulkEdit } from './../../composables/useBulkEdit'
 import useMonths from './../../composables/months'
 import { useToast } from './../../composables/toast'
 import { utils, writeFile } from 'xlsx'
+import {
+  BulkActionsToolbar,
+  createFindStateFunction,
+  createFixLocationFunction,
+  createGetDateFunction,
+  createSortedComputed
+} from './GenericDataTableView.vue'
+
+// Define TypeScript interface for Vaccination report
+interface VaccinationReport {
+  doc_id: string
+  created_at: number
+  disease?: {
+    disease_name?: string
+    vaccination_type?: string
+    vaccination_number?: string | number
+  }
+  other_diseases?: string
+  vaccination?: {
+    batch_no?: string
+    expiry_date?: number
+    source?: string
+    animal_name?: string
+    animal_type?: string
+    vaccine_name?: string
+    vaccine_type?: string
+  }
+  location?: {
+    lat: number
+    lng: number
+  }
+  approved: boolean
+  finished: boolean
+}
 
 export default defineComponent({
-  components: { VaccinationDeclineForm, BulkEditModal },
+  components: { VaccinationDeclineForm, BulkActionsToolbar },
   props: {
     export_to_excel: Number,
     selected_category: String,
@@ -23,15 +55,43 @@ export default defineComponent({
       selected_state: selected_state
     } = toRefs(props)
     const months = ref(useMonths().months)
-    const action = ref('') as any
-    const value = ref([]) as any
     const doc_id = ref('')
     const decline_form = ref(false)
     const { success, error, warning } = useToast()
 
     const reporter_state = computed(() => useVaccination().reporter_state)
-    const vaccination = computed(() => useVaccination().vaccination) as any
+    const vaccination = computed(() => useVaccination().vaccination as VaccinationReport[])
     const successful = computed(() => useVaccination().successful)
+    const loading = computed(() => useVaccination().loading)
+    const pagination = computed(() => useVaccination().pagination)
+
+    // Vuetify data table state
+    const itemsPerPage = ref(20)
+    const selectedReports = ref<VaccinationReport[]>([])
+    const sortBy = ref<any[]>([{ key: 'created_at', order: 'desc' }])
+
+    const sortedVaccination = computed(createSortedComputed(vaccination, sortBy))
+
+    // Define table headers with wider widths for long column names
+    const headers = ref([
+      { title: 'S/N', key: 'index', sortable: false, width: 60 },
+      { title: 'Created Date', key: 'created_at', sortable: true, width: 140 },
+      { title: 'Report State - LGA', key: 'state_lga', sortable: false, width: 180 },
+      { title: 'Disease - Disease Name', key: 'disease.disease_name', sortable: false, width: 200 },
+      { title: 'Disease - Vaccination Type', key: 'disease.vaccination_type', sortable: false, width: 220 },
+      { title: 'Disease - Vaccination Number', key: 'disease.vaccination_number', sortable: false, width: 230 },
+      { title: 'Other Diseases', key: 'other_diseases', sortable: false, width: 160 },
+      { title: 'Vaccination - Batch Number', key: 'vaccination.batch_no', sortable: false, width: 220 },
+      { title: 'Vaccination - Expiry Date', key: 'vaccination.expiry_date', sortable: false, width: 210 },
+      { title: 'Vaccination - Source', key: 'vaccination.source', sortable: false, width: 180 },
+      { title: 'Vaccination - Animal Name', key: 'vaccination.animal_name', sortable: false, width: 210 },
+      { title: 'Vaccination - Animal Type', key: 'vaccination.animal_type', sortable: false, width: 210 },
+      { title: 'Vaccination - Vaccine Name', key: 'vaccination.vaccine_name', sortable: false, width: 220 },
+      { title: 'Vaccination - Vaccine Type', key: 'vaccination.vaccine_type', sortable: false, width: 220 },
+      { title: 'Location - Lat', key: 'location.lat', sortable: false, width: 130 },
+      { title: 'Location - Lng', key: 'location.lng', sortable: false, width: 130 },
+      { title: 'Action', key: 'actions', sortable: false, width: 180 }
+    ])
 
     watch(selected_category, () => {
       getVaccination()
@@ -41,12 +101,6 @@ export default defineComponent({
     })
     watch(successful, () => {
       getVaccination()
-    })
-    watch(action, () => {
-      performAction()
-    })
-    watch(vaccination, () => {
-      vaccination_count()
     })
     watch(export_to_excel, () => {
       exportTableToExcel()
@@ -75,64 +129,60 @@ export default defineComponent({
         useVaccination().getVaccination(values)
       }
     }
-    const getDate = (val: any) => {
-      if (!val) return 'Invalid Date'
-      const month = new Date(val).getMonth()
-      const day = new Date(val).getDate()
-      const year = new Date(val).getFullYear()
-      
-      // Safety check for months array
-      if (!months.value || !months.value[month]) {
-        return 'Invalid Date'
+
+    const loadNextPage = () => {
+      let sort = true
+      let progress = false
+      if (selected_category.value == 'Approved') {
+        sort = true
+        progress = false
+      } else if (selected_category.value == 'Pending') {
+        sort = false
+        progress = false
+      } else if (selected_category.value == 'In Progress') {
+        sort = false
+        progress = true
       }
-      
-      return months.value[month].short + ' ' + day + ', ' + year
-    }
-    const fixLocation = (val: any) => {
-      if (val !== undefined) {
-        return val.toFixed(6)
-      } else {
-        return 'Unable to get location.'
+
+      const values = {
+        category: sort,
+        state: selected_state.value,
+        in_progress: progress
       }
-    }
-    const performAction = () => {
-      if (action.value != '') {
-        var index = action.value.match(/\d+/)[0]
-        if (index >= 0) {
-          const document_id = vaccination.value[index].doc_id
-          if (action.value == 'in_progress_' + index) {
-            useVaccination().in_progress(document_id)
-          } else if (action.value == 'approve_' + index) {
-            useVaccination().approve(document_id)
-          } else if (action.value == 'pending_' + index) {
-            useVaccination().pending(document_id)
-          } else if (action.value == 'decline_' + index) {
-            declineForm(document_id)
-          }
-        }
-        action.value = ''
+
+      if (pagination.value.hasMore && !loading.value) {
+        useVaccination().loadNextPage(values)
       }
     }
-    const vaccination_count = () => {
-      value.value = []
-      const count = vaccination.value.length
-      for (let val = 0; val < count; val++) {
-        value.value.push(0)
+
+    const getDate = createGetDateFunction(months)
+    const fixLocation = createFixLocationFunction()
+
+    const performAction = (action: string, docId: string) => {
+      if (action === 'in_progress') {
+        useVaccination().in_progress(docId)
+      } else if (action === 'approve') {
+        useVaccination().approve(docId)
+      } else if (action === 'pending') {
+        useVaccination().pending(docId)
+      } else if (action === 'decline') {
+        declineForm(docId)
       }
     }
-    const declineForm = (id: any) => {
+
+    const declineForm = (id: string) => {
       decline_form.value = true
       doc_id.value = id
     }
+
     const closeModal = () => {
       decline_form.value = false
     }
+
     const exportTableToExcel = async () => {
       try {
-        // Get export filters from global state (set by ReportsPage)
         const exportFilters = (window as any).exportFilters || {}
-        
-        // Prepare filters for the export method
+
         const filters = {
           category: selected_category.value === 'Approved',
           state: selected_state.value || 'All States',
@@ -141,15 +191,13 @@ export default defineComponent({
           endDate: exportFilters.endDate
         }
 
-        // Fetch filtered data from store (no pagination limits)
         const exportData = await useVaccination().exportVaccination(filters)
-        
+
         if (exportData.length === 0) {
           warning('No vaccination reports found matching your selected filters. Try adjusting your date range or filters.')
           return
         }
 
-        // Prepare headers
         const headers = [
           'Date Reported',
           'State',
@@ -161,7 +209,6 @@ export default defineComponent({
           'Reporter'
         ]
 
-        // Prepare data rows
         const rows = exportData.map((item: any) => {
           const reporterState = findState(item.doc_id)
           return [
@@ -176,26 +223,21 @@ export default defineComponent({
           ]
         })
 
-        // Combine headers and data
         const worksheetData = [headers, ...rows]
-        
-        // Generate base filename
+
         let baseFilename = `${selected_category.value || 'All'}_Vaccination_Reports`
         if (exportFilters.startDate || exportFilters.endDate) {
           baseFilename += '_Filtered'
         }
         baseFilename += `_${Date.now()}`
 
-        // Export based on selected format
         const format = exportFilters.format || 'excel'
-        
+
         if (format === 'csv') {
-          // Create CSV content
-          const csvContent = worksheetData.map(row => 
+          const csvContent = worksheetData.map(row =>
             row.map(cell => `"${String(cell).replace(/"/g, '""')}"`).join(',')
           ).join('\n')
-          
-          // Create and download CSV
+
           const blob = new Blob([csvContent], { type: 'text/csv;charset=utf-8;' })
           const link = document.createElement('a')
           link.href = URL.createObjectURL(blob)
@@ -203,7 +245,6 @@ export default defineComponent({
           link.click()
           URL.revokeObjectURL(link.href)
         } else if (format === 'pdf') {
-          // Create HTML content for PDF printing
           const htmlContent = `
             <html>
               <head>
@@ -221,15 +262,15 @@ export default defineComponent({
                 <div class="header">
                   <h2>Vaccination Reports - ${selected_category.value || 'All'}</h2>
                   <p>Generated on: ${new Date().toLocaleString()}</p>
-                  ${exportFilters.startDate || exportFilters.endDate ? 
-                    `<p>Date Range: ${exportFilters.startDate || 'No start'} to ${exportFilters.endDate || 'No end'}</p>` : 
+                  ${exportFilters.startDate || exportFilters.endDate ?
+                    `<p>Date Range: ${exportFilters.startDate || 'No start'} to ${exportFilters.endDate || 'No end'}</p>` :
                     '<p>Date Range: All dates</p>'
                   }
                   <p>Total Records: ${exportData.length}</p>
                 </div>
                 <table>
-                  ${worksheetData.map((row, index) => 
-                    `<tr>${row.map(cell => 
+                  ${worksheetData.map((row, index) =>
+                    `<tr>${row.map(cell =>
                       index === 0 ? `<th>${cell}</th>` : `<td>${cell}</td>`
                     ).join('')}</tr>`
                   ).join('')}
@@ -237,7 +278,7 @@ export default defineComponent({
               </body>
             </html>
           `
-          
+
           const printWindow = window.open('', '_blank')
           if (printWindow) {
             printWindow.document.write(htmlContent)
@@ -245,61 +286,64 @@ export default defineComponent({
             printWindow.print()
           }
         } else {
-          // Default to Excel format
           const workbook = utils.book_new()
           const worksheet = utils.aoa_to_sheet(worksheetData)
           utils.book_append_sheet(workbook, worksheet, 'Vaccination Reports')
           writeFile(workbook, `${baseFilename}.xlsx`)
         }
-        
+
         success(`Successfully exported ${exportData.length} vaccination reports to ${format === 'csv' ? 'CSV' : format === 'pdf' ? 'PDF' : 'Excel'}.`)
       } catch (exportError) {
         console.error('Error exporting vaccination data:', exportError)
         error('Failed to export vaccination reports. Please try again or contact support if the issue persists.')
       }
     }
-    const findState = (id: string) => {
-      const found_reporter = reporter_state.value.find((reporter: any) => reporter.doc_id === id)
-      if (found_reporter != undefined) {
-        return found_reporter.state_lga
-      } else {
-        return { state: 'null', local_govt: 'null' }
+
+    const findState = createFindStateFunction(reporter_state)
+
+    // Bulk actions
+    const handleBulkAction = async (action: string) => {
+      if (selectedReports.value.length === 0) {
+        warning('Please select at least one report')
+        return
+      }
+
+      const docIds = selectedReports.value.map(report => report.doc_id)
+      const result = await useVaccination().bulkUpdateStatus(docIds, action as any)
+
+      if (result.success.length > 0) {
+        success(`Successfully updated ${result.success.length} reports`)
+        selectedReports.value = []
+        getVaccination()
+      }
+
+      if (result.failed.length > 0) {
+        error(`Failed to update ${result.failed.length} reports`)
       }
     }
-
-    // Initialize bulk edit composable AFTER all function declarations
-    const {
-      selectedReports,
-      selectAll,
-      showBulkEditModal,
-      toggleReportSelection,
-      toggleSelectAll,
-      openBulkEditModal,
-      closeBulkEditModal,
-      handleBulkEditConfirm
-    } = useBulkEdit(vaccination, useVaccination(), getVaccination)
 
     onMounted(() => {
       getVaccination()
     })
 
     return {
-      action,
+      vaccination,
+      sortedVaccination,
       decline_form,
       doc_id,
-      vaccination,
+      headers,
+      itemsPerPage,
+      selectedReports,
+      sortBy,
       getDate,
       findState,
       fixLocation,
       closeModal,
-      selectedReports,
-      selectAll,
-      showBulkEditModal,
-      toggleReportSelection,
-      toggleSelectAll,
-      openBulkEditModal,
-      closeBulkEditModal,
-      handleBulkEditConfirm
+      loading,
+      pagination,
+      loadNextPage,
+      performAction,
+      handleBulkAction
     }
   }
 })
@@ -307,285 +351,162 @@ export default defineComponent({
 
 <template>
   <div>
-    <div class="mb-4">
-      <button
-        v-if="selectedReports.size > 0"
-        @click="openBulkEditModal"
-        class="px-4 py-2 bg-blue-600 text-white rounded hover:bg-blue-700 transition-colors"
-      >
-        Bulk Edit Status ({{ selectedReports.size }} selected)
-      </button>
-    </div>
-    <div class="w-full overflow-x-auto">
-      <table class="w-3000 mb-10" id="vaccination_to_excel">
-        <tr class="grid mt-8 mb-1 text-cool-gray-500 text-sm grid-cols-52">
-          <th class="col-span-2 bg-card-8 rounded-tl-md border-r border-cool-gray-200 px-3 py-3 shadow-md">
-            <div class="flex flex-col items-center gap-1">
-              <span class="text-xs font-semibold">Bulk Status Change</span>
-              <input
-                type="checkbox"
-                :checked="selectAll"
-                @change="toggleSelectAll"
-                class="cursor-pointer"
-              />
-            </div>
-          </th>
-          <th
-            class="col-span-1 bg-card-8 border-r border-cool-gray-200 px-3 py-3 shadow-md"
+    <BulkActionsToolbar
+      :selected-reports="selectedReports"
+      @bulk-action="handleBulkAction"
+      @clear-selection="selectedReports = []"
+    />
+
+    <!-- Vuetify Data Table -->
+    <v-data-table
+      v-model="selectedReports"
+      v-model:items-per-page="itemsPerPage"
+      v-model:sort-by="sortBy"
+      :headers="headers"
+      :items="sortedVaccination"
+      :loading="loading"
+      show-select
+      return-object
+      item-value="doc_id"
+      class="elevation-1"
+      fixed-header
+      height="600px"
+    >
+      <!-- Serial Number Column -->
+      <template v-slot:item.index="{ index }">
+        {{ index + 1 }}
+      </template>
+
+      <!-- Created Date Column -->
+      <template v-slot:item.created_at="{ item }">
+        {{ getDate(item.created_at) }}
+      </template>
+
+      <!-- State/LGA Column -->
+      <template v-slot:item.state_lga="{ item }">
+        {{ findState(item.doc_id).state }} / {{ findState(item.doc_id).local_govt }}
+      </template>
+
+      <!-- Disease Name -->
+      <template v-slot:item.disease.disease_name="{ item }">
+        {{ item.disease?.disease_name || 'N/A' }}
+      </template>
+
+      <!-- Vaccination Type -->
+      <template v-slot:item.disease.vaccination_type="{ item }">
+        {{ item.disease?.vaccination_type || 'N/A' }}
+      </template>
+
+      <!-- Vaccination Number -->
+      <template v-slot:item.disease.vaccination_number="{ item }">
+        {{ item.disease?.vaccination_number || 'N/A' }}
+      </template>
+
+      <!-- Batch Number -->
+      <template v-slot:item.vaccination.batch_no="{ item }">
+        {{ item.vaccination?.batch_no || 'N/A' }}
+      </template>
+
+      <!-- Expiry Date -->
+      <template v-slot:item.vaccination.expiry_date="{ item }">
+        {{ item.vaccination?.expiry_date ? getDate(item.vaccination.expiry_date) : 'N/A' }}
+      </template>
+
+      <!-- Source -->
+      <template v-slot:item.vaccination.source="{ item }">
+        {{ item.vaccination?.source || 'N/A' }}
+      </template>
+
+      <!-- Animal Name -->
+      <template v-slot:item.vaccination.animal_name="{ item }">
+        {{ item.vaccination?.animal_name || 'N/A' }}
+      </template>
+
+      <!-- Animal Type -->
+      <template v-slot:item.vaccination.animal_type="{ item }">
+        {{ item.vaccination?.animal_type || 'N/A' }}
+      </template>
+
+      <!-- Vaccine Name -->
+      <template v-slot:item.vaccination.vaccine_name="{ item }">
+        {{ item.vaccination?.vaccine_name || 'N/A' }}
+      </template>
+
+      <!-- Vaccine Type -->
+      <template v-slot:item.vaccination.vaccine_type="{ item }">
+        {{ item.vaccination?.vaccine_type || 'N/A' }}
+      </template>
+
+      <!-- Location Latitude -->
+      <template v-slot:item.location.lat="{ item }">
+        {{ item.location ? fixLocation(item.location.lat) : 'N/A' }}
+      </template>
+
+      <!-- Location Longitude -->
+      <template v-slot:item.location.lng="{ item }">
+        {{ item.location ? fixLocation(item.location.lng) : 'N/A' }}
+      </template>
+
+      <!-- Actions Column -->
+      <template v-slot:item.actions="{ item }">
+        <v-select
+          :items="[
+            { title: '-- Select Action --', value: '' },
+            ...(item.finished ? [{ title: 'In Progress', value: 'in_progress' }] : []),
+            ...(!item.approved ? [{ title: 'Approve', value: 'approve' }] : []),
+            ...(item.approved ? [{ title: 'Pending', value: 'pending' }] : []),
+            ...(item.finished ? [{ title: 'Decline', value: 'decline' }] : [])
+          ]"
+          density="compact"
+          variant="outlined"
+          hide-details
+          :model-value="''"
+          @update:model-value="(value: string) => value && performAction(value, item.doc_id)"
+        ></v-select>
+      </template>
+
+      <!-- Loading Slot -->
+      <template v-slot:loading>
+        <v-skeleton-loader type="table-row@10"></v-skeleton-loader>
+      </template>
+
+      <!-- No Data Slot -->
+      <template v-slot:no-data>
+        <div class="text-center py-8">
+          <div class="text-gray-500 text-lg">No reports found</div>
+          <div class="text-gray-400 text-sm mt-2">
+            Try adjusting your filters or check back later
+          </div>
+        </div>
+      </template>
+
+      <!-- Bottom Slot for Load More -->
+      <template v-slot:bottom>
+        <div class="text-center pa-4">
+          <v-btn
+            v-if="pagination.hasMore"
+            @click="loadNextPage"
+            :loading="loading"
+            color="primary"
+            variant="outlined"
           >
-            S/N
-          </th>
-          <th class="col-span-3 bg-card-8 border-r border-cool-gray-200 px-3 py-3 shadow-md">
-            Created Date
-          </th>
-          <th class="col-span-4 bg-card-8 border-r border-cool-gray-200 px-3 py-3 shadow-md">
-            Report State / LGA
-          </th>
-          <th class="col-span-3 bg-card-8 border-r border-cool-gray-200 px-3 py-3 shadow-md">
-            Disease /
-            <span>Disease Name</span>
-          </th>
-          <th class="col-span-3 bg-card-8 border-r border-cool-gray-200 px-3 py-3 shadow-md">
-            Disease /
-            <span>Vaccination Type</span>
-          </th>
-          <th class="col-span-3 bg-card-8 border-r border-cool-gray-200 px-3 py-3 shadow-md">
-            Disease /
-            <span>Vaccination number</span>
-          </th>
-          <th class="col-span-3 bg-card-8 border-r border-cool-gray-200 px-3 py-3 shadow-md">
-            Other Diseases
-          </th>
-          <th class="col-span-3 bg-card-8 border-r border-cool-gray-200 px-3 py-3 shadow-md">
-            Vaccination /
-            <span>Batch Number</span>
-          </th>
-          <th class="col-span-3 bg-card-8 border-r border-cool-gray-200 px-3 py-3 shadow-md">
-            Vaccination /
-            <span>Expiry Date</span>
-          </th>
-          <th class="col-span-3 bg-card-8 border-r border-cool-gray-200 px-3 py-3 shadow-md">
-            Vaccination /
-            <span>Source</span>
-          </th>
-          <th class="col-span-3 bg-card-8 border-r border-cool-gray-200 px-3 py-3 shadow-md">
-            Vaccination /
-            <span>Animal Name</span>
-          </th>
-          <th class="col-span-3 bg-card-8 border-r border-cool-gray-200 px-3 py-3 shadow-md">
-            Vaccination /
-            <span>Animal Type</span>
-          </th>
-          <th class="col-span-3 bg-card-8 border-r border-cool-gray-200 px-3 py-3 shadow-md">
-            Vaccination /
-            <span>Vaccine Name</span>
-          </th>
-          <th class="col-span-3 bg-card-8 border-r border-cool-gray-200 px-3 py-3 shadow-md">
-            Vaccination /
-            <span>Vaccine Type</span>
-          </th>
-          <th class="col-span-3 bg-card-8 border-r border-cool-gray-200 px-3 py-3 shadow-md">
-            Location /
-            <span>Lat</span>
-          </th>
-          <th class="col-span-3 bg-card-8 border-r border-cool-gray-200 px-3 py-3 shadow-md">
-            Location /
-            <span>Lng</span>
-          </th>
-          <!-- <th
-            class="col-span-3 bg-card-8 border-r border-cool-gray-200 px-3 py-3 shadow-md"
-          >
-            State
-          </th>
-          <th
-            class="col-span-3 bg-card-8 border-r border-cool-gray-200 px-3 py-3 shadow-md"
-          >
-            Local Govt
-          </th> -->
-          <th class="col-span-3 bg-card-8 border-r border-cool-gray-200 px-3 py-3 shadow-md">
-            Action
-          </th>
-        </tr>
-        <tr
-          class="grid text-cool-gray-500 w-3000 text-sm grid-cols-52"
-          v-for="(result, index) in vaccination"
-          :key="index"
-        >
-          <td class="col-span-2 bg-card-8 border-r border-t border-cool-gray-200 px-3 py-3 flex items-center justify-center">
-            <input
-              type="checkbox"
-              :checked="selectedReports.has(result.doc_id)"
-              @change="toggleReportSelection(result.doc_id)"
-              class="cursor-pointer"
-            />
-          </td>
-          <td
-            class="col-span-1 bg-card-8 border-r border-t border-cool-gray-200 text-cool-gray-700 px-3 py-3"
-          >
-            {{ index + 1 }}
-          </td>
-          <td
-            class="col-span-3 bg-card-8 border-r border-t border-cool-gray-200 text-cool-gray-700 px-3 py-3"
-          >
-            {{ getDate(result.created_at) }}
-          </td>
-          <td
-            class="col-span-4 bg-card-8 border-r border-t border-cool-gray-200 text-cool-gray-700 px-3 py-3"
-          >
-            {{ findState(result.doc_id).state + ' / ' + findState(result.doc_id).local_govt }}
-          </td>
-          <td
-            class="col-span-3 bg-card-8 border-r border-t border-cool-gray-200 text-cool-gray-700 px-3 py-3"
-          >
-            {{ result.disease ? result.disease.disease_name : '' }}
-          </td>
-          <td
-            class="col-span-3 bg-card-8 border-r border-t border-cool-gray-200 text-cool-gray-700 px-3 py-3"
-          >
-            {{ result.disease ? result.disease.vaccination_type : '' }}
-          </td>
-          <td
-            class="col-span-3 bg-card-8 border-r border-t border-cool-gray-200 text-cool-gray-700 px-3 py-3"
-          >
-            {{ result.disease ? result.disease.vaccination_number : '' }}
-          </td>
-          <td
-            class="col-span-3 bg-card-8 border-r border-t border-cool-gray-200 text-cool-gray-700 px-3 py-3"
-          >
-            {{ result.other_diseases ? result.other_diseases : '' }}
-          </td>
-          <td
-            class="col-span-3 bg-card-8 border-r border-t border-cool-gray-200 text-cool-gray-700 px-3 py-3"
-          >
-            {{
-              result.vaccination != undefined
-                ? result.vaccination.batch_no
-                  ? result.vaccination.batch_no
-                  : ''
-                : ''
-            }}
-          </td>
-          <td
-            class="col-span-3 bg-card-8 border-r border-t border-cool-gray-200 text-cool-gray-700 px-3 py-3"
-          >
-            {{
-              result.vaccination
-                ? result.vaccination.expiry_date
-                  ? getDate(result.vaccination.expiry_date)
-                  : ''
-                : ''
-            }}
-          </td>
-          <td
-            class="col-span-3 bg-card-8 border-r border-t border-cool-gray-200 text-cool-gray-700 px-3 py-3"
-          >
-            {{
-              result.vaccination != undefined
-                ? result.vaccination.source
-                  ? result.vaccination.source
-                  : ''
-                : ''
-            }}
-          </td>
-          <td
-            class="col-span-3 bg-card-8 border-r border-t border-cool-gray-200 text-cool-gray-700 px-3 py-3"
-          >
-            {{
-              result.vaccination != undefined
-                ? result.vaccination.animal_name
-                  ? result.vaccination.animal_name
-                  : ''
-                : ''
-            }}
-          </td>
-          <td
-            class="col-span-3 bg-card-8 border-r border-t border-cool-gray-200 text-cool-gray-700 px-3 py-3"
-          >
-            {{
-              result.vaccination != undefined
-                ? result.vaccination.animal_type
-                  ? result.vaccination.animal_type
-                  : ''
-                : ''
-            }}
-          </td>
-          <td
-            class="col-span-3 bg-card-8 border-r border-t border-cool-gray-200 text-cool-gray-700 px-3 py-3"
-          >
-            {{
-              result.vaccination != undefined
-                ? result.vaccination.vaccine_name
-                  ? result.vaccination.vaccine_name
-                  : ''
-                : ''
-            }}
-          </td>
-          <td
-            class="col-span-3 col bg-card-8 border-r border-t border-cool-gray-200 text-cool-gray-700 px-3 py-3"
-          >
-            {{
-              result.vaccination != undefined
-                ? result.vaccination.vaccine_type
-                  ? result.vaccination.vaccine_type
-                  : ''
-                : ''
-            }}
-          </td>
-          <td
-            class="col-span-3 bg-card-8 border-r border-t border-cool-gray-200 text-cool-gray-700 px-3 py-3"
-          >
-            {{ result.location ? fixLocation(result.location.lat) : '' }}
-          </td>
-          <td
-            class="col-span-3 bg-card-8 border-r border-t border-cool-gray-200 text-cool-gray-700 px-3 py-3"
-          >
-            {{ result.location ? fixLocation(result.location.lng) : '' }}
-          </td>
-          <!-- <td
-            class="col-span-3 bg-card-8 border-r border-t border-cool-gray-200 text-cool-gray-700 px-3 py-3"
-          >
-            {{ result.vaccination ? result.state : '' }}
-          </td>
-          <td
-            class="col-span-3 bg-card-8 border-r border-t border-cool-gray-200 text-cool-gray-700 px-3 py-3"
-          >
-            {{ result.vaccination ? result.local_govt : '' }}
-          </td> -->
-          <td
-            class="col-span-3 bg-card-8 border-r border-t border-cool-gray-200 text-cool-gray-700 px-3 py-3"
-          >
-            <select class="px-2 py-1 text-sm bg-card-8 focus:outline-none" v-model="action">
-              <option value="">-- Select Action --</option>
-              <option :value="'in_progress_' + index" v-if="result.finished">In Progress</option>
-              <option :value="'approve_' + index" v-if="!result.approved">Approve</option>
-              <option :value="'pending_' + index" v-if="result.approved">Pending</option>
-              <option :value="'decline_' + index" v-if="result.finished">Decline</option>
-            </select>
-          </td>
-        </tr>
-      </table>
-    </div>
+            Load More
+          </v-btn>
+          <div v-else class="text-sm text-gray-500">
+            All reports loaded ({{ vaccination.length }} total)
+          </div>
+        </div>
+      </template>
+    </v-data-table>
+
+    <!-- Decline Form Modal -->
     <vaccination-decline-form
       v-if="decline_form"
       :full="full"
       :doc_id="doc_id"
-      @open-form="closeModal()"
+      @open-form="closeModal"
     ></vaccination-decline-form>
-
-    <bulk-edit-modal
-      v-if="showBulkEditModal"
-      :selected-count="selectedReports.size"
-      @close="closeBulkEditModal"
-      @confirm="handleBulkEditConfirm"
-    ></bulk-edit-modal>
   </div>
 </template>
 
-<style scoped>
-.w-1800 {
-  width: 1800px;
-}
-.w-3000 {
-  width: 3000px;
-}
-</style>
+<style scoped src="./GenericDataTableStyles.css"></style>

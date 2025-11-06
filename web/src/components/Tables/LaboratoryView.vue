@@ -1,15 +1,49 @@
 <script lang="ts">
-import { computed, defineComponent, onMounted, ref, toRefs, watch } from 'vue'
-import useMonths from './../../composables/months'
 import { useLaboratory } from './../../stores/laboratory'
+import { computed, defineComponent, onMounted, ref, toRefs, watch } from 'vue'
 import LaboratoryDeclineForm from './DeclineForm/LaboratoryDeclineForm.vue'
-import BulkEditModal from './../BulkEditModal.vue'
-import { useBulkEdit } from './../../composables/useBulkEdit'
+import useMonths from './../../composables/months'
 import { useToast } from './../../composables/toast'
 import { utils, writeFile } from 'xlsx'
+import {
+  createGetDateFunction,
+  createFindStateFunction,
+  createSortedComputed,
+  BulkActionsToolbar
+} from './GenericDataTableView.vue'
+
+// Define TypeScript interface for Laboratory report
+interface LaboratoryReport {
+  doc_id: string
+  created_at: number
+  disease?: string
+  other_diseases?: string
+  sample_code?: string
+  date?: {
+    date_received?: number
+    date_released?: number
+  }
+  location?: {
+    unit?: string
+    farm_name?: string
+    location_address?: string
+  }
+  diagnostic_test?: string
+  samples?: string[]
+  disease_and_result?: {
+    disease?: string[]
+    test?: string[]
+  }
+  laboratory_confirmation?: string
+  laboratory_dvs_number?: string
+  agent_serotype?: string
+  farmer_phone_number?: string
+  approved: boolean
+  finished: boolean
+}
 
 export default defineComponent({
-  components: { LaboratoryDeclineForm, BulkEditModal },
+  components: { LaboratoryDeclineForm, BulkActionsToolbar },
   props: {
     export_to_excel: [Boolean, Number],
     selected_category: String,
@@ -23,15 +57,48 @@ export default defineComponent({
       selected_state: selected_state
     } = toRefs(props)
     const months = ref(useMonths().months)
-    const action = ref('') as any
-    const value = ref([]) as any
     const doc_id = ref('')
     const decline_form = ref(false)
+    const value = ref([]) as any
     const { success, error, warning } = useToast()
 
     const reporter_state = computed(() => useLaboratory().reporter_state)
-    const laboratory = computed(() => useLaboratory().laboratory) as any
+    const laboratory = computed(() => useLaboratory().laboratory as LaboratoryReport[])
     const successful = computed(() => useLaboratory().successful)
+    const loading = computed(() => useLaboratory().loading)
+    const pagination = computed(() => useLaboratory().pagination)
+
+    // Vuetify data table state
+    const itemsPerPage = ref(20)
+    const selectedReports = ref<LaboratoryReport[]>([])
+    const sortBy = ref<any[]>([{ key: 'created_at', order: 'desc' }])
+
+    // Use shared sorting logic from GenericDataTableView
+    const sortedLaboratory = computed(createSortedComputed(laboratory, sortBy))
+
+    // Define table headers with exact column names from the original
+    const headers = ref([
+      { title: 'S/N', key: 'index', sortable: false, width: 60 },
+      { title: 'Created Date', key: 'created_at', sortable: true, width: 140 },
+      { title: 'Report State - LGA', key: 'state_lga', sortable: false, width: 180 },
+      { title: 'Name of Disease', key: 'disease', sortable: true, width: 180 },
+      { title: 'Other Diseases', key: 'other_diseases', sortable: false, width: 150 },
+      { title: 'Disease Suspicion code', key: 'sample_code', sortable: false, width: 180 },
+      { title: 'Dates - Received', key: 'date.date_received', sortable: false, width: 150 },
+      { title: 'Dates - Result Released', key: 'date.date_released', sortable: false, width: 180 },
+      { title: 'Location - Epiemioogical Unit', key: 'location.unit', sortable: false, width: 200 },
+      { title: 'Location - Farm Name', key: 'location.farm_name', sortable: false, width: 180 },
+      { title: 'Location - Location Address', key: 'location.location_address', sortable: false, width: 200 },
+      { title: 'Diagnostic Test', key: 'diagnostic_test', sortable: false, width: 150 },
+      { title: 'Samples', key: 'samples', sortable: false, width: 150 },
+      { title: 'Disease & Result - Name of Disease', key: 'disease_result_name', sortable: false, width: 240 },
+      { title: 'Disease & Result - Test Result', key: 'disease_result_test', sortable: false, width: 220 },
+      { title: 'Laboratory confirmation number', key: 'laboratory_confirmation', sortable: false, width: 220 },
+      { title: 'DVS Phone number', key: 'laboratory_dvs_number', sortable: false, width: 160 },
+      { title: 'Agent - Serotype', key: 'agent_serotype', sortable: false, width: 160 },
+      { title: 'Farmer\'s Phone Number', key: 'farmer_phone_number', sortable: false, width: 180 },
+      { title: 'Action', key: 'actions', sortable: false, width: 180 }
+    ])
 
     watch(selected_category, () => {
       getLaboratory()
@@ -41,9 +108,6 @@ export default defineComponent({
     })
     watch(successful, () => {
       getLaboratory()
-    })
-    watch(action, () => {
-      performAction()
     })
     watch(laboratory, () => {
       laboratory_count()
@@ -73,44 +137,48 @@ export default defineComponent({
       }
       useLaboratory().getLaboratory(values)
     }
-    const getDate = (val: any) => {
-      if (!val) return 'Invalid Date'
-      const month = new Date(val).getMonth()
-      const day = new Date(val).getDate()
-      const year = new Date(val).getFullYear()
-      
-      // Safety check for months array
-      if (!months.value || !months.value[month]) {
-        return 'Invalid Date'
+
+    const loadNextPage = () => {
+      let sort = false
+      let progress = false
+      if (selected_category.value == 'Approved') {
+        sort = true
+        progress = false
+      } else if (selected_category.value == 'Pending') {
+        sort = false
+        progress = false
+      } else if (selected_category.value == 'In Progress') {
+        sort = false
+        progress = true
       }
-      
-      return months.value[month].short + ' ' + day + ', ' + year
-    }
-    // const fixLocation = (val: any) => {
-    //   if (val !== undefined) {
-    //     return val.toFixed(6)
-    //   } else {
-    //     return 'Unable to get location.'
-    //   }
-    // }
-    const performAction = () => {
-      if (action.value != '') {
-        var index = action.value.match(/\d+/)[0]
-        if (index >= 0) {
-          const document_id = laboratory.value[index].doc_id
-          if (action.value == 'in_progress_' + index) {
-            useLaboratory().in_progress(document_id)
-          } else if (action.value == 'approve_' + index) {
-            useLaboratory().approve(document_id)
-          } else if (action.value == 'pending_' + index) {
-            useLaboratory().pending(document_id)
-          } else if (action.value == 'decline_' + index) {
-            declineForm(document_id)
-          }
-        }
-        action.value = ''
+
+      const values = {
+        category: sort,
+        state: selected_state.value,
+        in_progress: progress
+      }
+
+      if (pagination.value.hasMore && !loading.value) {
+        useLaboratory().loadNextPage(values)
       }
     }
+
+    // Use shared utility functions
+    const getDate = createGetDateFunction(months)
+    const findState = createFindStateFunction(reporter_state)
+
+    const performAction = (action: string, docId: string) => {
+      if (action === 'in_progress') {
+        useLaboratory().in_progress(docId)
+      } else if (action === 'approve') {
+        useLaboratory().approve(docId)
+      } else if (action === 'pending') {
+        useLaboratory().pending(docId)
+      } else if (action === 'decline') {
+        declineForm(docId)
+      }
+    }
+
     const laboratory_count = () => {
       value.value = []
       const count = laboratory.value.length
@@ -118,18 +186,21 @@ export default defineComponent({
         value.value.push(0)
       }
     }
-    const declineForm = (id: any) => {
+
+    const declineForm = (id: string) => {
       decline_form.value = true
       doc_id.value = id
     }
+
     const closeModal = () => {
       decline_form.value = false
     }
+
     const exportTableToExcel = async () => {
       try {
         // Get export filters from global state (set by ReportsPage)
         const exportFilters = (window as any).exportFilters || {}
-        
+
         // Prepare filters for the export method
         const filters = {
           category: selected_category.value === 'Approved',
@@ -141,7 +212,7 @@ export default defineComponent({
 
         // Fetch filtered data from store (no pagination limits)
         const exportData = await useLaboratory().exportLaboratory(filters)
-        
+
         if (exportData.length === 0) {
           warning('No laboratory reports found matching your selected filters. Try adjusting your date range or filters.')
           return
@@ -176,7 +247,7 @@ export default defineComponent({
 
         // Combine headers and data
         const worksheetData = [headers, ...rows]
-        
+
         // Generate base filename
         let baseFilename = `${selected_category.value || 'All'}_Laboratory_Reports`
         if (exportFilters.startDate || exportFilters.endDate) {
@@ -186,13 +257,13 @@ export default defineComponent({
 
         // Export based on selected format
         const format = exportFilters.format || 'excel'
-        
+
         if (format === 'csv') {
           // Create CSV content
-          const csvContent = worksheetData.map(row => 
+          const csvContent = worksheetData.map(row =>
             row.map(cell => `"${String(cell).replace(/"/g, '""')}"`).join(',')
           ).join('\n')
-          
+
           // Create and download CSV
           const blob = new Blob([csvContent], { type: 'text/csv;charset=utf-8;' })
           const link = document.createElement('a')
@@ -219,15 +290,15 @@ export default defineComponent({
                 <div class="header">
                   <h2>Laboratory Reports - ${selected_category.value || 'All'}</h2>
                   <p>Generated on: ${new Date().toLocaleString()}</p>
-                  ${exportFilters.startDate || exportFilters.endDate ? 
-                    `<p>Date Range: ${exportFilters.startDate || 'No start'} to ${exportFilters.endDate || 'No end'}</p>` : 
+                  ${exportFilters.startDate || exportFilters.endDate ?
+                    `<p>Date Range: ${exportFilters.startDate || 'No start'} to ${exportFilters.endDate || 'No end'}</p>` :
                     '<p>Date Range: All dates</p>'
                   }
                   <p>Total Records: ${exportData.length}</p>
                 </div>
                 <table>
-                  ${worksheetData.map((row, index) => 
-                    `<tr>${row.map(cell => 
+                  ${worksheetData.map((row, index) =>
+                    `<tr>${row.map(cell =>
                       index === 0 ? `<th>${cell}</th>` : `<td>${cell}</td>`
                     ).join('')}</tr>`
                   ).join('')}
@@ -235,7 +306,7 @@ export default defineComponent({
               </body>
             </html>
           `
-          
+
           const printWindow = window.open('', '_blank')
           if (printWindow) {
             printWindow.document.write(htmlContent)
@@ -249,35 +320,34 @@ export default defineComponent({
           utils.book_append_sheet(workbook, worksheet, 'Laboratory Reports')
           writeFile(workbook, `${baseFilename}.xlsx`)
         }
-        
+
         success(`Successfully exported ${exportData.length} laboratory reports to ${format === 'csv' ? 'CSV' : format === 'pdf' ? 'PDF' : 'Excel'}.`)
       } catch (exportError) {
         console.error('Error exporting laboratory data:', exportError)
         error('Failed to export laboratory reports. Please try again or contact support if the issue persists.')
       }
     }
-    const findState = (doc_id: any) => {
-      const found_reporter = reporter_state.value.find(
-        (reporter: any) => reporter.doc_id === doc_id
-      )
-      if (found_reporter != undefined) {
-        return found_reporter.state_lga
-      } else {
-        return { state: 'null', local_govt: 'null' }
+
+    // Bulk actions
+    const handleBulkAction = async (action: string) => {
+      if (selectedReports.value.length === 0) {
+        warning('Please select at least one report')
+        return
+      }
+
+      const docIds = selectedReports.value.map(report => report.doc_id)
+      const result = await useLaboratory().bulkUpdateStatus(docIds, action as any)
+
+      if (result.success.length > 0) {
+        success(`Successfully updated ${result.success.length} reports`)
+        selectedReports.value = []
+        getLaboratory()
+      }
+
+      if (result.failed.length > 0) {
+        error(`Failed to update ${result.failed.length} reports`)
       }
     }
-
-    // Initialize bulk edit composable AFTER all function declarations
-    const {
-      selectedReports,
-      selectAll,
-      showBulkEditModal,
-      toggleReportSelection,
-      toggleSelectAll,
-      openBulkEditModal,
-      closeBulkEditModal,
-      handleBulkEditConfirm
-    } = useBulkEdit(laboratory, useLaboratory(), getLaboratory)
 
     onMounted(() => {
       getLaboratory()
@@ -285,21 +355,22 @@ export default defineComponent({
 
     return {
       laboratory,
+      sortedLaboratory,
       value,
       decline_form,
-      action,
       doc_id,
+      headers,
+      itemsPerPage,
+      selectedReports,
+      sortBy,
       getDate,
       findState,
       closeModal,
-      selectedReports,
-      selectAll,
-      showBulkEditModal,
-      toggleReportSelection,
-      toggleSelectAll,
-      openBulkEditModal,
-      closeBulkEditModal,
-      handleBulkEditConfirm
+      loading,
+      pagination,
+      loadNextPage,
+      performAction,
+      handleBulkAction
     }
   }
 })
@@ -307,292 +378,167 @@ export default defineComponent({
 
 <template>
   <div>
-    <div class="mb-4">
-      <button
-        v-if="selectedReports.size > 0"
-        @click="openBulkEditModal"
-        class="px-4 py-2 bg-blue-600 text-white rounded hover:bg-blue-700 transition-colors"
-      >
-        Bulk Edit Status ({{ selectedReports.size }} selected)
-      </button>
-    </div>
-    <div class="w-full overflow-x-auto">
-      <table class="w-4000 mb-10" id="labtoraory_disease_to_excel">
-        <tr class="grid mt-8 mb-1 text-cool-gray-500 text-sm grid-cols-42">
-          <th class="col-span-2 bg-card-8 rounded-tl-md border-r border-cool-gray-200 px-3 py-3 shadow-md">
-            <div class="flex flex-col items-center gap-1">
-              <span class="text-xs font-semibold">Bulk Status Change</span>
-              <input
-                type="checkbox"
-                :checked="selectAll"
-                @change="toggleSelectAll"
-                class="cursor-pointer"
-              />
-            </div>
-          </th>
-          <th
-            class="col-span-1 bg-card-8 border-r border-cool-gray-200 px-3 py-3 shadow-md"
+    <!-- Bulk Actions Toolbar Component -->
+    <BulkActionsToolbar
+      :selected-reports="selectedReports"
+      @bulk-action="handleBulkAction"
+      @clear-selection="selectedReports = []"
+    />
+
+    <!-- Vuetify Data Table -->
+    <v-data-table
+      v-model="selectedReports"
+      v-model:items-per-page="itemsPerPage"
+      v-model:sort-by="sortBy"
+      :headers="headers"
+      :items="sortedLaboratory"
+      :loading="loading"
+      show-select
+      return-object
+      item-value="doc_id"
+      class="elevation-1"
+      fixed-header
+      height="600px"
+    >
+      <!-- Serial Number Column -->
+      <template v-slot:item.index="{ index }">
+        {{ index + 1 }}
+      </template>
+
+      <!-- Created Date Column -->
+      <template v-slot:item.created_at="{ item }">
+        {{ getDate(item.created_at) }}
+      </template>
+
+      <!-- State/LGA Column -->
+      <template v-slot:item.state_lga="{ item }">
+        {{ findState(item.doc_id).state }} / {{ findState(item.doc_id).local_govt }}
+      </template>
+
+      <!-- Date Received -->
+      <template v-slot:item.date.date_received="{ item }">
+        {{ item.date?.date_received ? getDate(item.date.date_received) : 'N/A' }}
+      </template>
+
+      <!-- Date Released -->
+      <template v-slot:item.date.date_released="{ item }">
+        {{ item.date?.date_released ? getDate(item.date.date_released) : 'N/A' }}
+      </template>
+
+      <!-- Location Unit -->
+      <template v-slot:item.location.unit="{ item }">
+        {{ item.location?.unit || 'N/A' }}
+      </template>
+
+      <!-- Location Farm Name -->
+      <template v-slot:item.location.farm_name="{ item }">
+        {{ item.location?.farm_name || 'N/A' }}
+      </template>
+
+      <!-- Location Address -->
+      <template v-slot:item.location.location_address="{ item }">
+        {{ item.location?.location_address || 'N/A' }}
+      </template>
+
+      <!-- Samples -->
+      <template v-slot:item.samples="{ item }">
+        <v-select
+          v-if="item.samples?.length"
+          :model-value="item.samples[0]"
+          :items="item.samples"
+          density="compact"
+          variant="outlined"
+          hide-details
+        ></v-select>
+        <span v-else>N/A</span>
+      </template>
+
+      <!-- Disease & Result - Name of Disease -->
+      <template v-slot:item.disease_result_name="{ item }">
+        <v-select
+          v-if="item.disease_and_result?.disease?.length"
+          :model-value="item.disease_and_result.disease[0]"
+          :items="item.disease_and_result.disease"
+          density="default"
+          variant="outlined"
+          hide-details
+        ></v-select>
+        <span v-else>N/A</span>
+      </template>
+
+      <!-- Disease & Result - Test Result -->
+      <template v-slot:item.disease_result_test="{ item }">
+        <v-select
+          v-if="item.disease_and_result?.test?.length"
+          :model-value="item.disease_and_result.test[0]"
+          :items="item.disease_and_result.test"
+          density="compact"
+          variant="outlined"
+          hide-details
+        ></v-select>
+        <span v-else>N/A</span>
+      </template>
+
+      <!-- Actions Column -->
+      <template v-slot:item.actions="{ item }">
+        <v-select
+          :items="[
+            { title: '-- Select Action --', value: '' },
+            ...(item.finished ? [{ title: 'In Progress', value: 'in_progress' }] : []),
+            ...(!item.approved ? [{ title: 'Approve', value: 'approve' }] : []),
+            ...(item.approved ? [{ title: 'Pending', value: 'pending' }] : []),
+            ...(item.finished ? [{ title: 'Decline', value: 'decline' }] : [])
+          ]"
+          density="compact"
+          variant="outlined"
+          hide-details
+          :model-value="''"
+          @update:model-value="(value: string) => value && performAction(value, item.doc_id)"
+        ></v-select>
+      </template>
+
+      <!-- Loading Slot -->
+      <template v-slot:loading>
+        <v-skeleton-loader type="table-row@10"></v-skeleton-loader>
+      </template>
+
+      <!-- No Data Slot -->
+      <template v-slot:no-data>
+        <div class="text-center py-8">
+          <div class="text-gray-500 text-lg">No reports found</div>
+          <div class="text-gray-400 text-sm mt-2">
+            Try adjusting your filters or check back later
+          </div>
+        </div>
+      </template>
+
+      <!-- Bottom Slot for Load More -->
+      <template v-slot:bottom>
+        <div class="text-center pa-4">
+          <v-btn
+            v-if="pagination.hasMore"
+            @click="loadNextPage"
+            :loading="loading"
+            color="primary"
+            variant="outlined"
           >
-            S/N
-          </th>
-          <th class="col-span-2 bg-card-8 border-r border-cool-gray-200 px-3 py-3 shadow-md">
-            Created Date
-          </th>
-          <th class="col-span-2 bg-card-8 border-r border-cool-gray-200 px-3 py-3 shadow-md">
-            Report State / LGA
-          </th>
-          <th class="col-span-3 bg-card-8 border-r border-cool-gray-200 px-3 py-3 shadow-md">
-            Name of Disease
-          </th>
-          <th class="col-span-2 bg-card-8 border-r border-cool-gray-200 px-3 py-3 shadow-md">
-            Other Diseases
-          </th>
-          <th class="col-span-2 bg-card-8 border-r border-cool-gray-200 px-3 py-3 shadow-md">
-            Disease Suspicion code
-          </th>
-          <th class="col-span-2 bg-card-8 border-r border-cool-gray-200 px-3 py-3 shadow-md">
-            Dates /
-            <span>Received</span>
-          </th>
-          <th class="col-span-2 bg-card-8 border-r border-cool-gray-200 px-3 py-3 shadow-md">
-            Dates /
-            <span>Result Released</span>
-          </th>
-          <!-- <th
-            class="col-span-2 bg-card-8 border-r border-cool-gray-200 px-3 py-3 shadow-md"
-          >
-            Location /
-            <span>State</span>
-          </th>
-          <th
-            class="col-span-2 bg-card-8 border-r border-cool-gray-200 px-3 py-3 shadow-md"
-          >
-            Location /
-            <span>LGA</span>
-          </th> -->
-          <th class="col-span-2 bg-card-8 border-r border-cool-gray-200 px-3 py-3 shadow-md">
-            Location /
-            <span>Epiemioogical Unit</span>
-          </th>
-          <th class="col-span-2 bg-card-8 border-r border-cool-gray-200 px-3 py-3 shadow-md">
-            Location /
-            <span>Farm Name</span>
-          </th>
-          <th class="col-span-2 bg-card-8 border-r border-cool-gray-200 px-3 py-3 shadow-md">
-            Location /
-            <span>Location Address</span>
-          </th>
-          <th class="col-span-2 bg-card-8 border-r border-cool-gray-200 px-3 py-3 shadow-md">
-            Diagnostic Test
-          </th>
-          <th class="col-span-2 bg-card-8 border-r border-cool-gray-200 px-3 py-3 shadow-md">
-            Samples
-          </th>
-          <th class="col-span-2 bg-card-8 border-r border-cool-gray-200 px-3 py-3 shadow-md">
-            Disease &amp; Result /
-            <span>Name of Disease</span>
-          </th>
-          <th class="col-span-2 bg-card-8 border-r border-cool-gray-200 px-3 py-3 shadow-md">
-            Disease &amp; Result /
-            <span>Test Result</span>
-          </th>
-          <th class="col-span-2 bg-card-8 border-r border-cool-gray-200 px-3 py-3 shadow-md">
-            Laboratory confirmation number
-          </th>
-          <th class="col-span-2 bg-card-8 border-r border-cool-gray-200 px-3 py-3 shadow-md">
-            DVS Phone number
-          </th>
-          <th class="col-span-2 bg-card-8 border-r border-cool-gray-200 px-3 py-3 shadow-md">
-            Agent / Serotype
-          </th>
-          <th class="col-span-2 bg-card-8 border-r border-cool-gray-200 px-3 py-3 shadow-md">
-            Farmer's Phone Number
-          </th>
-          <th class="col-span-2 bg-card-8 border-r border-cool-gray-200 px-3 py-3 shadow-md">
-            Action
-          </th>
-        </tr>
-        <tr
-          class="grid text-cool-gray-500 w-3800 text-sm grid-cols-42"
-          v-for="(result, index) in laboratory"
-          :key="index"
-        >
-          <td class="col-span-2 bg-card-8 border-r border-t border-cool-gray-200 px-3 py-3 flex items-center justify-center">
-            <input
-              type="checkbox"
-              :checked="selectedReports.has(result.doc_id)"
-              @change="toggleReportSelection(result.doc_id)"
-              class="cursor-pointer"
-            />
-          </td>
-          <td
-            class="col-span-1 bg-card-8 border-r border-t border-cool-gray-200 text-cool-gray-700 px-3 py-3"
-          >
-            {{ index + 1 }}
-          </td>
-          <td
-            class="col-span-2 bg-card-8 border-r border-t border-cool-gray-200 text-cool-gray-700 px-3 py-3"
-          >
-            {{ getDate(result.created_at) }}
-          </td>
-          <td
-            class="col-span-2 bg-card-8 border-r border-t border-cool-gray-200 text-cool-gray-700 px-3 py-3"
-          >
-            {{ findState(result.doc_id).state + ' / ' + findState(result.doc_id).local_govt }}
-          </td>
-          <td
-            class="col-span-3 bg-card-8 border-r border-t border-cool-gray-200 text-cool-gray-700 px-3 py-3"
-          >
-            {{ result.date ? result.disease : '' }}
-          </td>
-          <td
-            class="col-span-2 bg-card-8 border-r border-t border-cool-gray-200 text-cool-gray-700 px-3 py-3"
-          >
-            {{ result.other_diseases ? result.other_diseases : '' }}
-          </td>
-          <td
-            class="col-span-2 bg-card-8 border-r border-t border-cool-gray-200 text-cool-gray-700 px-3 py-3"
-          >
-            {{ result.sample_code ? result.sample_code : '' }}
-          </td>
-          <td
-            class="col-span-2 bg-card-8 border-r border-t border-cool-gray-200 text-cool-gray-700 px-3 py-3"
-          >
-            {{ result.date ? getDate(result.date.date_received) : '' }}
-          </td>
-          <td
-            class="col-span-2 bg-card-8 border-r border-t border-cool-gray-200 text-cool-gray-700 px-3 py-3"
-          >
-            {{ result.date ? getDate(result.date.date_released) : '' }}
-          </td>
-          <!-- <td
-            class="col-span-2 bg-card-8 border-r border-t border-cool-gray-200 text-cool-gray-700 px-3 py-3"
-          >
-            {{ result.location ? result.location.state : '' }}
-          </td>
-          <td
-            class="col-span-2 bg-card-8 border-r border-t border-cool-gray-200 text-cool-gray-700 px-3 py-3"
-          >
-            {{ result.location ? result.location.local_govt : '' }}
-          </td> -->
-          <td
-            class="col-span-2 bg-card-8 border-r border-t border-cool-gray-200 text-cool-gray-700 px-3 py-3"
-          >
-            {{ result.location ? result.location.unit : '' }}
-          </td>
-          <td
-            class="col-span-2 bg-card-8 border-r border-t border-cool-gray-200 text-cool-gray-700 px-3 py-3"
-          >
-            {{ result.location ? result.location.farm_name : '' }}
-          </td>
-          <td
-            class="col-span-2 bg-card-8 border-r border-t border-cool-gray-200 text-cool-gray-700 px-3 py-3"
-          >
-            {{ result.location ? result.location.location_address : '' }}
-          </td>
-          <td
-            class="col-span-2 bg-card-8 border-r border-t border-cool-gray-200 text-cool-gray-700 px-3 py-3"
-          >
-            {{ result.diagnostic_test ? result.diagnostic_test : '' }}
-          </td>
-          <td
-            class="col-span-2 bg-card-8 border-r border-t border-cool-gray-200 text-cool-gray-700 px-3 py-3"
-          >
-            <select class="w-full py-1 bg-card-8 border-gray-200 focus:outline-none">
-              <option v-for="(sample, index) in result.samples ? result.samples : ''" :key="index">
-                {{ sample }}
-              </option>
-            </select>
-          </td>
-          <td
-            class="col-span-2 bg-card-8 border-r border-t border-cool-gray-200 text-cool-gray-700 px-3 py-3"
-          >
-            <select
-              class="w-full py-1 bg-card-8 border-gray-200 focus:outline-none"
-              v-model="value[index]"
-            >
-              <option
-                v-for="(disease, number) in result.disease_and_result
-                  ? result.disease_and_result.disease
-                  : ''"
-                :key="number"
-                :value="number"
-              >
-                {{ disease }}
-              </option>
-            </select>
-          </td>
-          <td
-            class="col-span-2 bg-card-8 border-r border-t border-cool-gray-200 text-cool-gray-700 px-3 py-3"
-          >
-            <select
-              class="w-full py-1 bg-card-8 border-gray-200 focus:outline-none"
-              v-model="value[index]"
-            >
-              <option
-                v-for="(test, number) in result.disease_and_result
-                  ? result.disease_and_result.test
-                  : ''"
-                :key="number"
-                :value="number"
-              >
-                {{ test }}
-              </option>
-            </select>
-          </td>
-          <td
-            class="col-span-2 bg-card-8 border-r border-t border-cool-gray-200 text-cool-gray-700 px-3 py-3"
-          >
-            {{ result.laboratory_confirmation ? result.laboratory_confirmation : '' }}
-          </td>
-          <td
-            class="col-span-2 bg-card-8 border-r border-t border-cool-gray-200 text-cool-gray-700 px-3 py-3"
-          >
-            {{ result.laboratory_dvs_number ? result.laboratory_dvs_number : '' }}
-          </td>
-          <td
-            class="col-span-2 bg-card-8 border-r border-t border-cool-gray-200 text-cool-gray-700 px-3 py-3"
-          >
-            {{ result.agent_serotype ? result.agent_serotype : '' }}
-          </td>
-          <td
-            class="col-span-2 bg-card-8 border-r border-t border-cool-gray-200 text-cool-gray-700 px-3 py-3"
-          >
-            {{ result.farmer_phone_number ? result.farmer_phone_number : '' }}
-          </td>
-          <td class="col-span-2 bg-card-8 border-r border-t border-cool-gray-200 px-3 py-3">
-            <select class="px-2 py-1 text-sm bg-card-8 focus:outline-none" v-model="action">
-              <option value="">-- Select Action --</option>
-              <option :value="'in_progress_' + index" v-if="result.finished">In Progress</option>
-              <option :value="'approve_' + index" v-if="!result.approved">Approve</option>
-              <option :value="'pending_' + index" v-if="result.approved">Pending</option>
-              <option :value="'decline_' + index" v-if="result.finished">Decline</option>
-            </select>
-          </td>
-        </tr>
-      </table>
-    </div>
+            Load More
+          </v-btn>
+          <div v-else class="text-sm text-gray-500">
+            All reports loaded ({{ laboratory.length }} total)
+          </div>
+        </div>
+      </template>
+    </v-data-table>
+
+    <!-- Decline Form Modal -->
     <laboratory-decline-form
       v-if="decline_form"
       :full="full"
       :doc_id="doc_id"
       @open-form="closeModal"
     ></laboratory-decline-form>
-
-    <bulk-edit-modal
-      v-if="showBulkEditModal"
-      :selected-count="selectedReports.size"
-      @close="closeBulkEditModal"
-      @confirm="handleBulkEditConfirm"
-    ></bulk-edit-modal>
   </div>
 </template>
 
-<style scoped>
-.w-3200 {
-  width: 3200px;
-}
-.w-4000 {
-  width: 4000px;
-}
-</style>
+<style scoped src="./GenericDataTableStyles.css"></style>

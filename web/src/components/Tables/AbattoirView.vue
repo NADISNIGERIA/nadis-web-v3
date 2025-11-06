@@ -5,11 +5,63 @@ import AbattoirDeclineForm from './DeclineForm/AbattoirDeclineForm.vue'
 import BulkEditModal from '../BulkEditModal.vue'
 import useMonths from './../../composables/months'
 import { useToast } from './../../composables/toast'
-import { useBulkEdit } from './../../composables/useBulkEdit'
 import { utils, writeFile } from 'xlsx'
+import {
+  BulkActionsToolbar,
+  createFindStateFunction,
+  createFixLocationFunction,
+  createGetDateFunction,
+  createSortedComputed
+} from './GenericDataTableView.vue'
+
+// Define TypeScript interface for Abattoir report
+interface AbattoirReport {
+  doc_id: string
+  created_at: number
+  disease_name?: string
+  other_diseases?: string
+  name_of_abattoir?: string
+  address?: string
+  holding_capacity?: number
+  location?: {
+    lat: number
+    lng: number
+  }
+  species_affected?: {
+    species: string
+    other_species: string
+  }
+  source_of_animal?: string
+  disease_suspected?: string
+  animal_inspection?: {
+    inspected: number
+    rejected: number
+    reason_for_rejection: string
+  }
+  slaughter_figure?: number
+  anti_mortem?: {
+    inspected: number
+    appearance: string
+  }
+  post_mortem_inspection?: {
+    total_organs_suspected: number
+    legion_seen: string
+    number_suspected: number
+    selected_partially_condemned: string[]
+    selected_totally_condemned: string[]
+  }
+  sample_information?: {
+    samples_collected: string
+    date: number
+    number_of_sample_submitted: number
+  }
+  by_products?: string
+  approved: boolean
+  finished: boolean
+}
 
 export default defineComponent({
-  components: { AbattoirDeclineForm, BulkEditModal },
+  components: { AbattoirDeclineForm, BulkEditModal, BulkActionsToolbar },
   props: {
     export_to_excel: Number,
     selected_category: String,
@@ -22,17 +74,58 @@ export default defineComponent({
       selected_state: selected_state,
       export_to_excel: export_to_excel
     } = toRefs(props)
+
     const months = ref(useMonths().months)
-    const action = ref('') as any
     const doc_id = ref('')
     const decline_form = ref(false)
     const { success, error, warning } = useToast()
 
     const reporter_state = computed(() => useAbattoir().reporter_state)
-    const abattoir = computed(() => useAbattoir().abattoir) as any
+    const abattoir = computed(() => useAbattoir().abattoir as AbattoirReport[])
     const successful = computed(() => useAbattoir().successful)
     const loading = computed(() => useAbattoir().loading)
     const pagination = computed(() => useAbattoir().pagination)
+
+    // Vuetify data table state
+    const itemsPerPage = ref(20)
+    const selectedReports = ref<AbattoirReport[]>([])
+    const sortBy = ref<any[]>([{ key: 'created_at', order: 'desc' }])
+
+    const sortedAbattoir = computed(createSortedComputed(abattoir, sortBy))
+
+    // Define table headers
+    const headers = ref([
+      { title: 'S/N', key: 'index', sortable: false, width: 60 },
+      { title: 'Created Date', key: 'created_at', sortable: true, width: 120 },
+      { title: 'Report State / LGA', key: 'state_lga', sortable: false, width: 150 },
+      { title: 'Disease Suspected', key: 'disease_name', sortable: true, width: 150 },
+      { title: 'Other Diseases', key: 'other_diseases', sortable: false, width: 150 },
+      { title: 'Abattoir Name', key: 'name_of_abattoir', sortable: true, width: 150 },
+      { title: 'Address', key: 'address', sortable: false, width: 200 },
+      { title: 'Holding Capacity', key: 'holding_capacity', sortable: true, width: 120 },
+      { title: 'Location Lat', key: 'location.lat', sortable: false, width: 120 },
+      { title: 'Location Lng', key: 'location.lng', sortable: false, width: 120 },
+      { title: 'Species', key: 'species', sortable: false, width: 120 },
+      { title: 'Other Species', key: 'other_species', sortable: false, width: 120 },
+      { title: 'Source of Animals', key: 'source_of_animal', sortable: false, width: 150 },
+      { title: 'Disease Suspected', key: 'disease_suspected', sortable: false, width: 150 },
+      { title: 'Inspected', key: 'animal_inspection.inspected', sortable: false, width: 100 },
+      { title: 'Rejected', key: 'animal_inspection.rejected', sortable: false, width: 100 },
+      { title: 'Reason for Rejection', key: 'animal_inspection.reason_for_rejection', sortable: false, width: 180 },
+      { title: 'Slaughtered per day', key: 'slaughter_figure', sortable: false, width: 120 },
+      { title: 'Ante Mortem - Inspected', key: 'anti_mortem.inspected', sortable: false, width: 140 },
+      { title: 'Ante Mortem - Appearance', key: 'anti_mortem.appearance', sortable: false, width: 140 },
+      { title: 'Post Mortem - Organs Suspected', key: 'post_mortem_inspection.total_organs_suspected', sortable: false, width: 160 },
+      { title: 'Post Mortem - Lesion Seen', key: 'post_mortem_inspection.legion_seen', sortable: false, width: 150 },
+      { title: 'Post Mortem - No. Condemned', key: 'post_mortem_inspection.number_suspected', sortable: false, width: 150 },
+      { title: 'Partially Condemned', key: 'partially_condemned', sortable: false, width: 150 },
+      { title: 'Totally Condemned', key: 'totally_condemned', sortable: false, width: 150 },
+      { title: 'Samples Collected', key: 'sample_information.samples_collected', sortable: false, width: 140 },
+      { title: 'Sample Date', key: 'sample_information.date', sortable: false, width: 120 },
+      { title: 'Samples Submitted', key: 'sample_information.number_of_sample_submitted', sortable: false, width: 140 },
+      { title: 'By-Product', key: 'by_products', sortable: false, width: 120 },
+      { title: 'Action', key: 'actions', sortable: false, width: 150 }
+    ])
 
     watch(selected_category, () => {
       getAbattoir()
@@ -42,9 +135,6 @@ export default defineComponent({
     })
     watch(successful, () => {
       getAbattoir()
-    })
-    watch(action, () => {
-      performAction()
     })
     watch(export_to_excel, () => {
       exportTableToExcel()
@@ -93,55 +183,40 @@ export default defineComponent({
         state: selected_state.value,
         in_progress: progress
       }
-      
+
       if (pagination.value.hasMore && !loading.value) {
         useAbattoir().loadNextPage(values)
       }
     }
-    const getDate = (val: any) => {
-      const month = new Date(val).getMonth()
-      const day = new Date(val).getDate()
-      const year = new Date(val).getFullYear()
-      return months.value[month].short + ' ' + day + ', ' + year
-    }
-    const fixLocation = (val: any) => {
-      if (val !== undefined) {
-        return val.toFixed(6)
-      } else {
-        return 'Unable to get location.'
+
+    const getDate = createGetDateFunction(months)
+    const fixLocation = createFixLocationFunction()
+
+    const performAction = (action: string, docId: string) => {
+      if (action === 'in_progress') {
+        useAbattoir().in_progress(docId)
+      } else if (action === 'approve') {
+        useAbattoir().approve(docId)
+      } else if (action === 'pending') {
+        useAbattoir().pending(docId)
+      } else if (action === 'decline') {
+        declineForm(docId)
       }
     }
-    const performAction = () => {
-      if (action.value != '') {
-        let index = action.value.match(/\d+/)[0]
-        if (index >= 0) {
-          const document_id = abattoir.value[index].doc_id
-          if (action.value == 'in_progress_' + index) {
-            useAbattoir().in_progress(document_id)
-          } else if (action.value == 'approve_' + index) {
-            useAbattoir().approve(document_id)
-          } else if (action.value == 'pending_' + index) {
-            useAbattoir().pending(document_id)
-          } else if (action.value == 'decline_' + index) {
-            declineForm(document_id)
-          }
-        }
-        action.value = ''
-      }
-    }
-    const declineForm = (id: any) => {
+
+    const declineForm = (id: string) => {
       decline_form.value = true
       doc_id.value = id
     }
+
     const closeModal = () => {
       decline_form.value = false
     }
+
     const exportTableToExcel = async () => {
       try {
-        // Get export filters from global state (set by ReportsPage)
         const exportFilters = (window as any).exportFilters || {}
-        
-        // Prepare filters for the export method
+
         const filters = {
           category: selected_category.value === 'Approved',
           state: selected_state.value || 'All States',
@@ -150,19 +225,17 @@ export default defineComponent({
           endDate: exportFilters.endDate
         }
 
-        // Fetch filtered data from store (no pagination limits)
         const exportData = await useAbattoir().exportAbattoir(filters)
-        
+
         if (exportData.length === 0) {
           warning('No abattoir reports found matching your selected filters. Try adjusting your date range or filters.')
           return
         }
 
-        // Prepare headers
         const headers = [
           'Date Reported',
           'State',
-          'LGA', 
+          'LGA',
           'Species',
           'Disease',
           'Number Affected',
@@ -170,7 +243,6 @@ export default defineComponent({
           'Reporter'
         ]
 
-        // Prepare data rows
         const rows = exportData.map((item: any) => {
           const reporterState = findState(item.doc_id)
           return [
@@ -185,26 +257,21 @@ export default defineComponent({
           ]
         })
 
-        // Combine headers and data
         const worksheetData = [headers, ...rows]
-        
-        // Generate base filename
+
         let baseFilename = `${selected_category.value || 'All'}_Abattoir_Reports`
         if (exportFilters.startDate || exportFilters.endDate) {
           baseFilename += '_Filtered'
         }
         baseFilename += `_${Date.now()}`
 
-        // Export based on selected format
         const format = exportFilters.format || 'excel'
-        
+
         if (format === 'csv') {
-          // Create CSV content
-          const csvContent = worksheetData.map(row => 
+          const csvContent = worksheetData.map(row =>
             row.map(cell => `"${String(cell).replace(/"/g, '""')}"`).join(',')
           ).join('\n')
-          
-          // Create and download CSV
+
           const blob = new Blob([csvContent], { type: 'text/csv;charset=utf-8;' })
           const link = document.createElement('a')
           link.href = URL.createObjectURL(blob)
@@ -212,8 +279,6 @@ export default defineComponent({
           link.click()
           URL.revokeObjectURL(link.href)
         } else if (format === 'pdf') {
-          // For PDF, we'll create a simple HTML table and use window.print
-          // This is a basic implementation - for production, consider using jsPDF or similar
           const htmlContent = `
             <html>
               <head>
@@ -231,15 +296,15 @@ export default defineComponent({
                 <div class="header">
                   <h2>Abattoir Reports - ${selected_category.value || 'All'}</h2>
                   <p>Generated on: ${new Date().toLocaleString()}</p>
-                  ${exportFilters.startDate || exportFilters.endDate ? 
-                    `<p>Date Range: ${exportFilters.startDate || 'No start'} to ${exportFilters.endDate || 'No end'}</p>` : 
+                  ${exportFilters.startDate || exportFilters.endDate ?
+                    `<p>Date Range: ${exportFilters.startDate || 'No start'} to ${exportFilters.endDate || 'No end'}</p>` :
                     '<p>Date Range: All dates</p>'
                   }
                   <p>Total Records: ${exportData.length}</p>
                 </div>
                 <table>
-                  ${worksheetData.map((row, index) => 
-                    `<tr>${row.map(cell => 
+                  ${worksheetData.map((row, index) =>
+                    `<tr>${row.map(cell =>
                       index === 0 ? `<th>${cell}</th>` : `<td>${cell}</td>`
                     ).join('')}</tr>`
                   ).join('')}
@@ -247,7 +312,7 @@ export default defineComponent({
               </body>
             </html>
           `
-          
+
           const printWindow = window.open('', '_blank')
           if (printWindow) {
             printWindow.document.write(htmlContent)
@@ -255,48 +320,39 @@ export default defineComponent({
             printWindow.print()
           }
         } else {
-          // Default to Excel format
           const workbook = utils.book_new()
           const worksheet = utils.aoa_to_sheet(worksheetData)
           utils.book_append_sheet(workbook, worksheet, 'Abattoir Reports')
           writeFile(workbook, `${baseFilename}.xlsx`)
         }
-        
+
         success(`Successfully exported ${exportData.length} abattoir reports to ${format === 'csv' ? 'CSV' : format === 'pdf' ? 'PDF' : 'Excel'}.`)
       } catch (exportError) {
         console.error('Error exporting abattoir data:', exportError)
         error('Failed to export abattoir reports. Please try again or contact support if the issue persists.')
       }
     }
-    const findState = (doc_id: any) => {
-      const found_reporter = reporter_state.value.find(
-        (reporter: any) => reporter.doc_id === doc_id
-      )
-      if (found_reporter != undefined) {
-        return found_reporter.state_lga
-      } else {
-        return { state: 'null', local_govt: 'null' }
+
+    const findState = createFindStateFunction(reporter_state)
+
+    // Bulk actions
+    const handleBulkAction = async (action: string) => {
+      if (selectedReports.value.length === 0) {
+        warning('Please select at least one report')
+        return
       }
-    }
 
-    // Bulk edit - using composable (AFTER all function declarations)
-    const {
-      selectedReports,
-      selectAll,
-      showBulkEditModal,
-      toggleReportSelection,
-      toggleSelectAll,
-      openBulkEditModal,
-      closeBulkEditModal,
-      handleBulkEditConfirm
-    } = useBulkEdit(abattoir, useAbattoir(), getAbattoir)
+      const docIds = selectedReports.value.map(report => report.doc_id)
+      const result = await useAbattoir().bulkUpdateStatus(docIds, action as any)
 
-    const handleBulkAction = (event: Event) => {
-      const target = event.target as HTMLSelectElement
-      const action = target.value
-      if (action) {
-        handleBulkEditConfirm(action)
-        target.value = '' // Reset dropdown
+      if (result.success.length > 0) {
+        success(`Successfully updated ${result.success.length} reports`)
+        selectedReports.value = []
+        getAbattoir()
+      }
+
+      if (result.failed.length > 0) {
+        error(`Failed to update ${result.failed.length} reports`)
       }
     }
 
@@ -306,9 +362,13 @@ export default defineComponent({
 
     return {
       abattoir,
-      action,
+      sortedAbattoir,
       decline_form,
       doc_id,
+      headers,
+      itemsPerPage,
+      selectedReports,
+      sortBy,
       getDate,
       findState,
       fixLocation,
@@ -316,15 +376,7 @@ export default defineComponent({
       loading,
       pagination,
       loadNextPage,
-      // Bulk edit from composable
-      selectedReports,
-      selectAll,
-      showBulkEditModal,
-      toggleReportSelection,
-      toggleSelectAll,
-      openBulkEditModal,
-      closeBulkEditModal,
-      handleBulkEditConfirm,
+      performAction,
       handleBulkAction
     }
   }
@@ -333,404 +385,202 @@ export default defineComponent({
 
 <template>
   <div>
-    <div class="w-full overflow-x-auto">
-      <table class="w-6000 mb-10" id="abattoir_to_excel">
-        <tr class="grid mt-8 mb-1 text-cool-gray-500 text-sm grid-cols-78">
-          <th class="col-span-2 bg-card-8 rounded-tl-md border-r border-cool-gray-200 px-3 py-3 shadow-md">
-            <div class="flex flex-col items-center gap-1">
-              <select
-                v-if="selectedReports.size > 0"
-                @change="handleBulkAction"
-                class="text-xs px-2 py-1 bg-blue-600 text-white rounded cursor-pointer focus:outline-none"
-              >
-                <option value="">Actions ({{ selectedReports.size }})</option>
-                <option value="pending">Set to Pending</option>
-                <option value="in_progress">Set to In Progress</option>
-                <option value="approved">Set to Approved</option>
-              </select>
-              <input
-                type="checkbox"
-                :checked="selectAll"
-                @change="toggleSelectAll"
-                class="cursor-pointer"
-              />
-            </div>
-          </th>
-          <th
-            class="col-span-1 bg-card-8 border-r border-cool-gray-200 px-3 py-3 shadow-md"
-          >
-            S/N
-          </th>
-          <th class="col-span-2 bg-card-8 border-r border-cool-gray-200 px-3 py-3 shadow-md">
-            Created Date
-          </th>
-          <th class="col-span-2 bg-card-8 border-r border-cool-gray-200 px-3 py-3 shadow-md">
-            Report State / LGA
-          </th>
-          <th class="col-span-3 bg-card-8 border-r border-cool-gray-200 px-3 py-3 shadow-md">
-            Disease Suspected
-          </th>
-          <th class="col-span-3 bg-card-8 border-r border-cool-gray-200 px-3 py-3 shadow-md">
-            Other Diseases
-          </th>
-          <th class="col-span-3 bg-card-8 border-r border-cool-gray-200 px-3 py-3 shadow-md">
-            Abattoir Name
-          </th>
-          <th class="col-span-3 bg-card-8 border-r border-cool-gray-200 px-3 py-3 shadow-md">
-            Address
-          </th>
-          <th class="col-span-2 bg-card-8 border-r border-cool-gray-200 px-3 py-3 shadow-md">
-            Holding Capacity
-          </th>
-          <th class="col-span-2 bg-card-8 border-r border-cool-gray-200 px-3 py-3 shadow-md">
-            Location / Lat
-          </th>
-          <th class="col-span-2 bg-card-8 border-r border-cool-gray-200 px-3 py-3 shadow-md">
-            Location / Lng
-          </th>
-          <th class="col-span-2 bg-card-8 border-r border-cool-gray-200 px-3 py-3 shadow-md">
-            Species
-          </th>
-          <th class="col-span-2 bg-card-8 border-r border-cool-gray-200 px-3 py-3 shadow-md">
-            Others species
-          </th>
-          <th class="col-span-2 bg-card-8 border-r border-cool-gray-200 px-3 py-3 shadow-md">
-            Source of Animals
-          </th>
-          <th class="col-span-2 bg-card-8 border-r border-cool-gray-200 px-3 py-3 shadow-md">
-            Diseases Suspected
-          </th>
-          <th class="col-span-3 bg-card-8 border-r border-cool-gray-200 px-3 py-3 shadow-md">
-            Inspection /
-            <span>Inspected</span>
-          </th>
-          <th class="col-span-3 bg-card-8 border-r border-cool-gray-200 px-3 py-3 shadow-md">
-            Inspection /
-            <span>Rejected</span>
-          </th>
-          <th class="col-span-3 bg-card-8 border-r border-cool-gray-200 px-3 py-3 shadow-md">
-            Inspection /
-            <span>Reason for Rejection</span>
-          </th>
-          <th class="col-span-2 bg-card-8 border-r border-cool-gray-200 px-3 py-3 shadow-md">
-            Slaughtered per day
-          </th>
-          <th class="col-span-3 bg-card-8 border-r border-cool-gray-200 px-3 py-3 shadow-md">
-            Ante Mortem Inspection /
-            <span> No. Inspected</span>
-          </th>
-          <th class="col-span-3 bg-card-8 border-r border-cool-gray-200 px-3 py-3 shadow-md">
-            Ante Mortem Inspection /
-            <span> Appearance</span>
-          </th>
-          <th class="col-span-3 bg-card-8 border-r border-cool-gray-200 px-3 py-3 shadow-md">
-            Post Mortem Inspection /
-            <span> Organs suspected</span>
-          </th>
-          <th class="col-span-3 bg-card-8 border-r border-cool-gray-200 px-3 py-3 shadow-md">
-            Post Mortem Inspection /
-            <span> Lesion seen</span>
-          </th>
-          <th class="col-span-3 bg-card-8 border-r border-cool-gray-200 px-3 py-3 shadow-md">
-            Post Mortem Inspection /
-            <span> No. of organs condemned</span>
-          </th>
-          <th class="col-span-3 bg-card-8 border-r border-cool-gray-200 px-3 py-3 shadow-md">
-            Post Mortem Inspection /
-            <span> Partially Condemned</span>
-          </th>
-          <th class="col-span-3 bg-card-8 border-r border-cool-gray-200 px-3 py-3 shadow-md">
-            Post Mortem Inspection /
-            <span> Totally Condemned</span>
-          </th>
-          <th class="col-span-3 bg-card-8 border-r border-cool-gray-200 px-3 py-3 shadow-md">
-            Sample Information /
-            <span> Collected</span>
-          </th>
-          <th class="col-span-3 bg-card-8 border-r border-cool-gray-200 px-3 py-3 shadow-md">
-            Sample Information /
-            <span> Date</span>
-          </th>
-          <th class="col-span-3 bg-card-8 border-r border-cool-gray-200 px-3 py-3 shadow-md">
-            Sample Information /
-            <span> Submitted</span>
-          </th>
+    <BulkActionsToolbar
+      :selected-reports="selectedReports"
+      @bulk-action="handleBulkAction"
+      @clear-selection="selectedReports = []"
+    />
 
-          <th class="col-span-2 bg-card-8 border-r border-cool-gray-200 px-3 py-3 shadow-md">
-            By-Product
-          </th>
-          <th class="col-span-2 bg-card-8 border-r border-cool-gray-200 px-3 py-3 shadow-md">
-            Action
-          </th>
-        </tr>
-        <tr
-          class="grid text-cool-gray-500 w-6000 text-sm grid-cols-78"
-          v-for="(result, index) in abattoir"
-          :key="index"
-        >
-          <td class="col-span-2 bg-card-8 border-r border-t border-cool-gray-200 px-3 py-3 flex items-center justify-center">
-            <input
-              type="checkbox"
-              :checked="selectedReports.has(result.doc_id)"
-              @change="toggleReportSelection(result.doc_id)"
-              class="cursor-pointer"
-            />
-          </td>
-          <td
-            class="col-span-1 bg-card-8 border-r border-t border-cool-gray-200 text-cool-gray-700 px-3 py-3"
-          >
-            {{ index + 1 }}
-          </td>
-          <td
-            class="col-span-2 bg-card-8 border-r border-t border-cool-gray-200 text-cool-gray-700 px-3 py-3"
-          >
-            {{ getDate(result.created_at) }}
-          </td>
-          <td
-            class="col-span-2 bg-card-8 border-r border-t border-cool-gray-200 text-cool-gray-700 px-3 py-3"
-          >
-            {{ findState(result.doc_id).state + ' / ' + findState(result.doc_id).local_govt }}
-          </td>
-          <td
-            class="col-span-3 bg-card-8 border-r border-t border-cool-gray-200 text-cool-gray-700 px-3 py-3"
-          >
-            {{ result.disease_name }}
-          </td>
-          <td
-            class="col-span-3 bg-card-8 border-r border-t border-cool-gray-200 text-cool-gray-700 px-3 py-3"
-          >
-            {{ result.other_diseases }}
-          </td>
-          <td
-            class="col-span-3 bg-card-8 border-r border-t border-cool-gray-200 text-cool-gray-700 px-3 py-3"
-          >
-            {{ result.name_of_abattoir }}
-          </td>
-          <td
-            class="col-span-3 bg-card-8 border-r border-t border-cool-gray-200 text-cool-gray-700 px-3 py-3"
-          >
-            {{ result.address }}
-          </td>
-          <td
-            class="col-span-2 bg-card-8 border-r border-t border-cool-gray-200 text-cool-gray-700 px-3 py-3"
-          >
-            {{ result.holding_capacity }}
-          </td>
-          <td
-            class="col-span-2 bg-card-8 border-r border-t border-cool-gray-200 text-cool-gray-700 px-3 py-3"
-          >
-            {{ result.location ? fixLocation(result.location.lat) : '' }}
-          </td>
-          <td
-            class="col-span-2 bg-card-8 border-r border-t border-cool-gray-200 text-cool-gray-700 px-3 py-3"
-          >
-            {{ result.location ? fixLocation(result.location.lng) : '' }}
-          </td>
-          <td
-            class="col-span-2 bg-card-8 border-r border-t border-cool-gray-200 text-cool-gray-700 px-3 py-3"
-          >
-            {{ result.species_affected ? result.species_affected.species : '' }}
-          </td>
-          <td
-            class="col-span-2 bg-card-8 border-r border-t border-cool-gray-200 text-cool-gray-700 px-3 py-3"
-          >
-            {{ result.species_affected ? result.species_affected.other_species : '' }}
-          </td>
-          <td
-            class="col-span-2 bg-card-8 border-r border-t border-cool-gray-200 text-cool-gray-700 px-3 py-3"
-          >
-            {{ result.source_of_animal ? result.source_of_animal : '' }}
-          </td>
-          <td
-            class="col-span-2 bg-card-8 border-r border-t border-cool-gray-200 text-cool-gray-700 px-3 py-3"
-          >
-            {{ result.disease_suspected ? result.disease_suspected : '' }}
-          </td>
-          <td
-            class="col-span-3 bg-card-8 border-r border-t border-cool-gray-200 text-cool-gray-700 px-3 py-3"
-          >
-            {{ result.animal_inspection ? result.animal_inspection.inspected : '' }}
-          </td>
-          <td
-            class="col-span-3 bg-card-8 border-r border-t border-cool-gray-200 text-cool-gray-700 px-3 py-3"
-          >
-            {{ result.animal_inspection ? result.animal_inspection.rejected : '' }}
-          </td>
-          <td
-            class="col-span-3 bg-card-8 border-r border-t border-cool-gray-200 text-cool-gray-700 px-3 py-3"
-          >
-            {{ result.animal_inspection ? result.animal_inspection.reason_for_rejection : '' }}
-          </td>
-          <td
-            class="col-span-2 bg-card-8 border-r border-t border-cool-gray-200 text-cool-gray-700 px-3 py-3"
-          >
-            {{ result.slaughter_figure ? result.slaughter_figure : '' }}
-          </td>
-          <td
-            class="col-span-3 bg-card-8 border-r border-t border-cool-gray-200 text-cool-gray-700 px-3 py-3"
-          >
-            {{ result.anti_mortem ? result.anti_mortem.inspected : '' }}
-          </td>
-          <td
-            class="col-span-3 bg-card-8 border-r border-t border-cool-gray-200 text-cool-gray-700 px-3 py-3"
-          >
-            {{ result.anti_mortem ? result.anti_mortem.appearance : '' }}
-          </td>
-          <td
-            class="col-span-3 bg-card-8 border-r border-t border-cool-gray-200 text-cool-gray-700 px-3 py-3"
-          >
-            {{
-              result.post_mortem_inspection
-                ? result.post_mortem_inspection.total_organs_suspected
-                : ''
-            }}
-          </td>
-          <td
-            class="col-span-3 bg-card-8 border-r border-t border-cool-gray-200 text-cool-gray-700 px-3 py-3"
-          >
-            {{ result.post_mortem_inspection ? result.post_mortem_inspection.legion_seen : '' }}
-          </td>
-          <td
-            class="col-span-3 bg-card-8 border-r border-t border-cool-gray-200 text-cool-gray-700 px-3 py-3"
-          >
-            {{
-              result.post_mortem_inspection ? result.post_mortem_inspection.number_suspected : ''
-            }}
-          </td>
-          <td
-            class="col-span-3 bg-card-8 border-r border-t border-cool-gray-200 text-cool-gray-700 px-3 py-3"
-          >
-            <select class="w-full py-1 bg-card-8 border-gray-200 focus:outline-none">
-              <option
-                v-for="(organ, index) in result.post_mortem_inspection
-                  ? result.post_mortem_inspection.selected_partially_condemned
-                  : ''"
-                :key="index"
-              >
-                {{ organ }}
-              </option>
-            </select>
-          </td>
-          <td
-            class="col-span-3 bg-card-8 border-r border-t border-cool-gray-200 text-cool-gray-700 px-3 py-3"
-          >
-            <select class="w-full py-1 bg-card-8 border-gray-200 focus:outline-none">
-              <option
-                v-for="(organ, index) in result.post_mortem_inspection
-                  ? result.post_mortem_inspection.selected_totally_condemned
-                  : ''"
-                :key="index"
-              >
-                {{ organ }}
-              </option>
-            </select>
-          </td>
-          <td
-            class="col-span-3 bg-card-8 border-r border-t border-cool-gray-200 text-cool-gray-700 px-3 py-3"
-          >
-            {{ result.sample_information ? result.sample_information.samples_collected : '' }}
-          </td>
-          <td
-            class="col-span-3 bg-card-8 border-r border-t border-cool-gray-200 text-cool-gray-700 px-3 py-3"
-          >
-            {{ result.sample_information ? getDate(result.sample_information.date) : '' }}
-          </td>
-          <td
-            class="col-span-3 bg-card-8 border-r border-t border-cool-gray-200 text-cool-gray-700 px-3 py-3"
-          >
-            {{
-              result.sample_information ? result.sample_information.number_of_sample_submitted : ''
-            }}
-          </td>
-          <td
-            class="col-span-2 bg-card-8 border-r border-t border-cool-gray-200 text-cool-gray-700 px-3 py-3"
-          >
-            {{ result.by_products ? result.by_products : '' }}
-          </td>
-          <td class="col-span-2 bg-card-8 border-r border-t border-cool-gray-200 px-3 py-3">
-            <select class="px-2 py-1 text-sm bg-card-8 focus:outline-none" v-model="action">
-              <option value="">-- Select Action --</option>
-              <option :value="'in_progress_' + index" v-if="result.finished">In Progress</option>
-              <option :value="'approve_' + index" v-if="!result.approved">Approve</option>
-              <option :value="'pending_' + index" v-if="result.approved">Pending</option>
-              <option :value="'decline_' + index" v-if="result.finished">Decline</option>
-            </select>
-          </td>
-        </tr>
-      </table>
-    </div>
+    <!-- Vuetify Data Table -->
+    <v-data-table
+      v-model="selectedReports"
+      v-model:items-per-page="itemsPerPage"
+      v-model:sort-by="sortBy"
+      :headers="headers"
+      :items="sortedAbattoir"
+      :loading="loading"
+      show-select
+      return-object
+      item-value="doc_id"
+      class="elevation-1"
+      fixed-header
+      height="600px"
+    >
+      <!-- Serial Number Column -->
+      <template v-slot:item.index="{ index }">
+        {{ index + 1 }}
+      </template>
 
-    <!-- Loading States and Pagination -->
-    <div class="px-4 py-4">
-      <!-- Loading Indicator -->
-      <div v-if="loading" class="flex justify-center items-center py-4">
-        <div class="animate-spin rounded-full h-8 w-8 border-b-2 border-primary"></div>
-        <span class="ml-2 text-gray-600">Loading reports...</span>
-      </div>
+      <!-- Created Date Column -->
+      <template v-slot:item.created_at="{ item }">
+        {{ getDate(item.created_at) }}
+      </template>
 
-      <!-- Pagination Controls -->
-      <div v-if="!loading && abattoir.length > 0" class="flex justify-between items-center py-4">
-        <div class="text-sm text-gray-600">
-          Showing {{ abattoir.length }} reports
-          <span v-if="pagination.hasMore">(Page {{ pagination.currentPage }})</span>
+      <!-- State/LGA Column -->
+      <template v-slot:item.state_lga="{ item }">
+        {{ findState(item.doc_id).state }} / {{ findState(item.doc_id).local_govt }}
+      </template>
+
+      <!-- Location Latitude -->
+      <template v-slot:item.location.lat="{ item }">
+        {{ item.location ? fixLocation(item.location.lat) : 'N/A' }}
+      </template>
+
+      <!-- Location Longitude -->
+      <template v-slot:item.location.lng="{ item }">
+        {{ item.location ? fixLocation(item.location.lng) : 'N/A' }}
+      </template>
+
+      <!-- Species -->
+      <template v-slot:item.species="{ item }">
+        {{ item.species_affected?.species || 'N/A' }}
+      </template>
+
+      <!-- Other Species -->
+      <template v-slot:item.other_species="{ item }">
+        {{ item.species_affected?.other_species || 'N/A' }}
+      </template>
+
+      <!-- Animal Inspection - Inspected -->
+      <template v-slot:item.animal_inspection.inspected="{ item }">
+        {{ item.animal_inspection?.inspected || 'N/A' }}
+      </template>
+
+      <!-- Animal Inspection - Rejected -->
+      <template v-slot:item.animal_inspection.rejected="{ item }">
+        {{ item.animal_inspection?.rejected || 'N/A' }}
+      </template>
+
+      <!-- Animal Inspection - Reason for Rejection -->
+      <template v-slot:item.animal_inspection.reason_for_rejection="{ item }">
+        {{ item.animal_inspection?.reason_for_rejection || 'N/A' }}
+      </template>
+
+      <!-- Ante Mortem - Inspected -->
+      <template v-slot:item.anti_mortem.inspected="{ item }">
+        {{ item.anti_mortem?.inspected || 'N/A' }}
+      </template>
+
+      <!-- Ante Mortem - Appearance -->
+      <template v-slot:item.anti_mortem.appearance="{ item }">
+        {{ item.anti_mortem?.appearance || 'N/A' }}
+      </template>
+
+      <!-- Post Mortem - Total Organs Suspected -->
+      <template v-slot:item.post_mortem_inspection.total_organs_suspected="{ item }">
+        {{ item.post_mortem_inspection?.total_organs_suspected || 'N/A' }}
+      </template>
+
+      <!-- Post Mortem - Lesion Seen -->
+      <template v-slot:item.post_mortem_inspection.legion_seen="{ item }">
+        {{ item.post_mortem_inspection?.legion_seen || 'N/A' }}
+      </template>
+
+      <!-- Post Mortem - Number Suspected -->
+      <template v-slot:item.post_mortem_inspection.number_suspected="{ item }">
+        {{ item.post_mortem_inspection?.number_suspected || 'N/A' }}
+      </template>
+
+      <!-- Partially Condemned Organs -->
+      <template v-slot:item.partially_condemned="{ item }">
+        <v-select
+          v-if="item.post_mortem_inspection?.selected_partially_condemned?.length"
+          :model-value="item.post_mortem_inspection.selected_partially_condemned[0]?.name"
+          :items="item.post_mortem_inspection.selected_partially_condemned.map((c: any) => c.name)"
+          density="compact"
+          variant="outlined"
+          hide-details
+        ></v-select>
+        <span v-else>N/A</span>
+      </template>
+
+      <!-- Totally Condemned Organs -->
+      <template v-slot:item.totally_condemned="{ item }">
+        <v-select
+          v-if="item.post_mortem_inspection?.selected_totally_condemned?.length"
+          :model-value="item.post_mortem_inspection.selected_totally_condemned[0]?.name"
+          :items="item.post_mortem_inspection.selected_totally_condemned.map((c: any) => c.name)"
+          density="compact"
+          variant="outlined"
+          hide-details
+        ></v-select>
+        <span v-else>N/A</span>
+      </template>
+
+      <!-- Sample Information - Collected -->
+      <template v-slot:item.sample_information.samples_collected="{ item }">
+        {{ item.sample_information?.samples_collected || 'N/A' }}
+      </template>
+
+      <!-- Sample Information - Date -->
+      <template v-slot:item.sample_information.date="{ item }">
+        {{ item.sample_information?.date ? getDate(item.sample_information.date) : 'N/A' }}
+      </template>
+
+      <!-- Sample Information - Submitted -->
+      <template v-slot:item.sample_information.number_of_sample_submitted="{ item }">
+        {{ item.sample_information?.number_of_sample_submitted || 'N/A' }}
+      </template>
+
+      <!-- Actions Column -->
+      <template v-slot:item.actions="{ item }">
+        <v-select
+          :items="[
+            { title: '-- Select Action --', value: '' },
+            ...(item.finished ? [{ title: 'In Progress', value: 'in_progress' }] : []),
+            ...(!item.approved ? [{ title: 'Approve', value: 'approve' }] : []),
+            ...(item.approved ? [{ title: 'Pending', value: 'pending' }] : []),
+            ...(item.finished ? [{ title: 'Decline', value: 'decline' }] : [])
+          ]"
+          density="compact"
+          variant="outlined"
+          hide-details
+          @update:model-value="(value: string) => value && performAction(value, item.doc_id)"
+        ></v-select>
+      </template>
+
+      <!-- Loading Slot -->
+      <template v-slot:loading>
+        <v-skeleton-loader type="table-row@10"></v-skeleton-loader>
+      </template>
+
+      <!-- No Data Slot -->
+      <template v-slot:no-data>
+        <div class="text-center py-8">
+          <div class="text-gray-500 text-lg">No reports found</div>
+          <div class="text-gray-400 text-sm mt-2">
+            Try adjusting your filters or check back later
+          </div>
         </div>
-        
-        <!-- Load More Button -->
-        <button
-          v-if="pagination.hasMore"
-          @click="loadNextPage"
-          :disabled="loading"
-          class="bg-primary hover:bg-primary-2 disabled:bg-gray-400 text-white px-4 py-2 rounded-md transition-colors duration-200"
-        >
-          <span v-if="!loading">Load More</span>
-          <span v-else>Loading...</span>
-        </button>
-        
-        <div v-else class="text-sm text-gray-500">
-          All reports loaded
-        </div>
-      </div>
+      </template>
 
-      <!-- No Data Message -->
-      <div v-if="!loading && abattoir.length === 0" class="text-center py-8">
-        <div class="text-gray-500 text-lg">No reports found</div>
-        <div class="text-gray-400 text-sm mt-2">
-          Try adjusting your filters or check back later
+      <!-- Bottom Slot for Load More -->
+      <template v-slot:bottom>
+        <div class="text-center pa-4">
+          <v-btn
+            v-if="pagination.hasMore"
+            @click="loadNextPage"
+            :loading="loading"
+            color="primary"
+            variant="outlined"
+          >
+            Load More
+          </v-btn>
+          <div v-else class="text-sm text-gray-500">
+            All reports loaded ({{ abattoir.length }} total)
+          </div>
         </div>
-      </div>
-    </div>
+      </template>
+    </v-data-table>
 
+    <!-- Decline Form Modal -->
     <abattoir-decline-form
       v-if="decline_form"
       :full="full"
       :doc_id="doc_id"
       @open-form="closeModal"
     ></abattoir-decline-form>
-
-    <!-- Bulk Edit Modal -->
-    <bulk-edit-modal
-      v-if="showBulkEditModal"
-      :selected-count="selectedReports.size"
-      @close="closeBulkEditModal"
-      @confirm="handleBulkEditConfirm"
-    />
   </div>
 </template>
 
-<style scoped>
-.w-2800 {
-  width: 2800px;
-}
-.w-4800 {
-  width: 4800px;
-}
-.w-5200 {
-  width: 5200px;
-}
-.w-6000 {
-  width: 6000px;
-}
-tr > th {
-  @apply font-normal;
-}
-</style>
+<style scoped src="./GenericDataTableStyles.css"></style>

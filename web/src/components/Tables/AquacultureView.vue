@@ -3,13 +3,70 @@ import { computed, defineComponent, onMounted, ref, toRefs, watch } from 'vue'
 import useMonths from './../../composables/months'
 import { useAquaculture } from './../../stores/aquaculture'
 import AquacultureDeclineForm from './DeclineForm/AquacultureDeclineForm.vue'
-import BulkEditModal from './../BulkEditModal.vue'
-import { useBulkEdit } from './../../composables/useBulkEdit'
 import { useToast } from './../../composables/toast'
 import { utils, writeFile } from 'xlsx'
+import {
+  BulkActionsToolbar,
+  createFindStateFunction,
+  createFixLocationFunction,
+  createGetDateFunction,
+  createSortedComputed
+} from './GenericDataTableView.vue'
+
+// Define TypeScript interface for Aquaculture report
+interface AquacultureReport {
+  doc_id: string
+  created_at: number
+  identifiers?: {
+    name_of_farm?: string
+    town?: string
+    capacity?: string | number
+    selected_species?: string
+    my_coordinate?: {
+      lat: number
+      lng: number
+    }
+    owner_phone_number?: string
+    registration_type?: string
+    fish_farm_association?: boolean
+    pond_type?: string
+  }
+  passive_surveillance?: {
+    health_plan?: boolean
+    vet_attend_to?: boolean
+    practitioner_visit?: boolean
+    fishes_on_farm?: string | number
+    mortality_for_month?: string | number
+    average_mortality_per_day?: string | number
+  }
+  water_quality?: {
+    recent_quality_test?: boolean
+    organic_material?: boolean
+    algae_available?: boolean
+    test_type?: string[]
+    change_pond_water?: boolean
+  }
+  biosecurity_measures?: {
+    selected_bio_measures?: Array<{ name: string }>
+    aquatic_available?: boolean
+  }
+  disease_suspected?: {
+    viral?: string
+    bacterial?: string
+    fungal?: string
+    protozoan_parasitic?: string
+    helminth_parasitic?: string
+    leech_infestation?: string
+    environmental_diseases?: string
+    nutritional_diseases?: string
+  }
+  oie_listed_fish_pathogens?: Array<{ name: string }>
+  approved: boolean
+  finished: boolean
+}
 
 export default defineComponent({
-  components: { AquacultureDeclineForm, BulkEditModal },
+  components: { AquacultureDeclineForm, BulkActionsToolbar },
   props: {
     export_to_excel: Number,
     selected_category: String,
@@ -23,14 +80,63 @@ export default defineComponent({
       selected_state: selected_state
     } = toRefs(props)
     const months = ref(useMonths().months)
-    const action = ref('') as any
     const doc_id = ref('')
     const decline_form = ref(false)
     const { success, error, warning } = useToast()
 
     const reporter_state = computed(() => useAquaculture().reporter_state)
-    const aquaculture = computed(() => useAquaculture().aquaculture) as any
+    const aquaculture = computed(() => useAquaculture().aquaculture as AquacultureReport[])
     const successful = computed(() => useAquaculture().successful)
+    const loading = computed(() => useAquaculture().loading)
+    const pagination = computed(() => useAquaculture().pagination)
+
+    // Vuetify data table state
+    const itemsPerPage = ref(20)
+    const selectedReports = ref<AquacultureReport[]>([])
+    const sortBy = ref<any[]>([{ key: 'created_at', order: 'desc' }])
+
+    const sortedAquaculture = computed(createSortedComputed(aquaculture, sortBy))
+
+    // Define table headers with exact column names from original
+    const headers = ref([
+      { title: 'S/N', key: 'index', sortable: false, width: 60 },
+      { title: 'Created Date', key: 'created_at', sortable: true, width: 140 },
+      { title: 'Report State - LGA', key: 'state_lga', sortable: false, width: 180 },
+      { title: 'Name of Farm', key: 'identifiers.name_of_farm', sortable: false, width: 150 },
+      { title: 'Region - Town/Village', key: 'identifiers.town', sortable: false, width: 180 },
+      { title: 'Farm Capacity', key: 'identifiers.capacity', sortable: false, width: 140 },
+      { title: 'Species', key: 'identifiers.selected_species', sortable: false, width: 140 },
+      { title: 'Location - Latitude', key: 'identifiers.my_coordinate.lat', sortable: false, width: 160 },
+      { title: 'Location - Longitute', key: 'identifiers.my_coordinate.lng', sortable: false, width: 160 },
+      { title: 'Owner\'s Phone Number', key: 'identifiers.owner_phone_number', sortable: false, width: 180 },
+      { title: 'Registration - Registered with Government?', key: 'identifiers.registration_type', sortable: false, width: 280 },
+      { title: 'Registration - Registration Type', key: 'identifiers.registration_type_display', sortable: false, width: 240 },
+      { title: 'Belong to Farmers Association?', key: 'identifiers.fish_farm_association', sortable: false, width: 240 },
+      { title: 'Type of Pond', key: 'identifiers.pond_type', sortable: false, width: 140 },
+      { title: 'Passive Surveillance - Any health plan', key: 'passive_surveillance.health_plan', sortable: false, width: 260 },
+      { title: 'Passive Surveillance - Vets attends to the health of aquatic species', key: 'passive_surveillance.vet_attend_to', sortable: false, width: 420 },
+      { title: 'Passive Surveillance - Health practitioner visits (bi-weekly)', key: 'passive_surveillance.practitioner_visit', sortable: false, width: 380 },
+      { title: 'Passive Surveillance - Fishes on the farm?', key: 'passive_surveillance.fishes_on_farm', sortable: false, width: 280 },
+      { title: 'Passive Surveillance - Mortality for the month', key: 'passive_surveillance.mortality_for_month', sortable: false, width: 300 },
+      { title: 'Passive Surveillance - Average mortality per day', key: 'passive_surveillance.average_mortality_per_day', sortable: false, width: 320 },
+      { title: 'Water Quality - Recent Test', key: 'water_quality.recent_quality_test', sortable: false, width: 200 },
+      { title: 'Water Quality - Contains organic materials and food debris?', key: 'water_quality.organic_material', sortable: false, width: 380 },
+      { title: 'Water Quality - Has Phytoplankton and algae available', key: 'water_quality.algae_available', sortable: false, width: 360 },
+      { title: 'Water Quality - Type of test normally done', key: 'water_quality.test_type', sortable: false, width: 300 },
+      { title: 'Water Quality - Change pond water', key: 'water_quality.change_pond_water', sortable: false, width: 260 },
+      { title: 'Biosecurity Measures - Measures Seen', key: 'biosecurity_measures.selected_bio_measures', sortable: false, width: 280 },
+      { title: 'Biosecurity Measures - Other aquatic within 1km', key: 'biosecurity_measures.aquatic_available', sortable: false, width: 320 },
+      { title: 'Diseases Suspected - Viral', key: 'disease_suspected.viral', sortable: false, width: 200 },
+      { title: 'Diseases Suspected - Bacterial', key: 'disease_suspected.bacterial', sortable: false, width: 220 },
+      { title: 'Diseases Suspected - Fungal', key: 'disease_suspected.fungal', sortable: false, width: 200 },
+      { title: 'Diseases Suspected - Protozoan parasitic', key: 'disease_suspected.protozoan_parasitic', sortable: false, width: 280 },
+      { title: 'Diseases Suspected - Helminth parasitic', key: 'disease_suspected.helminth_parasitic', sortable: false, width: 280 },
+      { title: 'Diseases Suspected - Leech parasitic', key: 'disease_suspected.leech_infestation', sortable: false, width: 260 },
+      { title: 'Diseases Suspected - Environmental diseases', key: 'disease_suspected.environmental_diseases', sortable: false, width: 320 },
+      { title: 'Diseases Suspected - Nutritional diseases', key: 'disease_suspected.nutritional_diseases', sortable: false, width: 320 },
+      { title: 'OIE listed fish pathogens (2020)', key: 'oie_listed_fish_pathogens', sortable: false, width: 260 },
+      { title: 'Action', key: 'actions', sortable: false, width: 180 }
+    ])
 
     watch(selected_category, () => {
       getAqauculture()
@@ -40,9 +146,6 @@ export default defineComponent({
     })
     watch(successful, () => {
       getAqauculture()
-    })
-    watch(action, () => {
-      performAction()
     })
     watch(export_to_excel, () => {
       exportTableToExcel()
@@ -69,48 +172,51 @@ export default defineComponent({
       }
       useAquaculture().getAquaculture(values)
     }
-    const getDate = (val: any) => {
-      if (!val) return 'Invalid Date'
-      const month = new Date(val).getMonth()
-      const day = new Date(val).getDate()
-      const year = new Date(val).getFullYear()
-      
-      // Safety check for months array
-      if (!months.value || !months.value[month]) {
-        return 'Invalid Date'
+    const loadNextPage = () => {
+      let sort = false
+      let progress = false
+      if (selected_category.value == 'Approved') {
+        sort = true
+        progress = false
+      } else if (selected_category.value == 'Pending') {
+        sort = false
+        progress = false
+      } else if (selected_category.value == 'In Progress') {
+        sort = false
+        progress = true
       }
-      
-      return months.value[month].short + ' ' + day + ', ' + year
-    }
-    const fixLocation = (val: any) => {
-      if (val !== undefined) {
-        return val.toFixed(6)
-      } else {
-        return 'Unable to get location.'
+
+      const values = {
+        category: sort,
+        state: selected_state.value,
+        in_progress: progress
       }
-    }
-    const performAction = () => {
-      if (action.value != '') {
-        const index = action.value.match(/\d+/)[0]
-        if (index >= 0) {
-          const document_id = aquaculture.value[index].doc_id
-          if (action.value == 'in_progress_' + index) {
-            useAquaculture().in_progress(document_id)
-          } else if (action.value == 'approve_' + index) {
-            useAquaculture().approve(document_id)
-          } else if (action.value == 'pending_' + index) {
-            useAquaculture().pending(document_id)
-          } else if (action.value == 'decline_' + index) {
-            declineForm(document_id)
-          }
-        }
-        action.value = ''
+
+      if (pagination.value.hasMore && !loading.value) {
+        useAquaculture().loadNextPage(values)
       }
     }
-    const declineForm = (document_id: any) => {
+
+    const getDate = createGetDateFunction(months)
+    const fixLocation = createFixLocationFunction()
+
+    const performAction = (action: string, docId: string) => {
+      if (action === 'in_progress') {
+        useAquaculture().in_progress(docId)
+      } else if (action === 'approve') {
+        useAquaculture().approve(docId)
+      } else if (action === 'pending') {
+        useAquaculture().pending(docId)
+      } else if (action === 'decline') {
+        declineForm(docId)
+      }
+    }
+
+    const declineForm = (id: string) => {
       decline_form.value = true
-      doc_id.value = document_id
+      doc_id.value = id
     }
+
     const closeModal = () => {
       decline_form.value = false
     }
@@ -247,26 +353,28 @@ export default defineComponent({
         error('Failed to export aquaculture reports. Please try again or contact support if the issue persists.')
       }
     }
-    const findState = (id: any) => {
-      const found_reporter = reporter_state.value.find((reporter: any) => reporter.doc_id === id)
-      if (found_reporter != undefined) {
-        return found_reporter.state_lga
-      } else {
-        return { state: 'null', local_govt: 'null' }
+    const findState = createFindStateFunction(reporter_state)
+
+    // Bulk actions
+    const handleBulkAction = async (action: string) => {
+      if (selectedReports.value.length === 0) {
+        warning('Please select at least one report')
+        return
+      }
+
+      const docIds = selectedReports.value.map(report => report.doc_id)
+      const result = await useAquaculture().bulkUpdateStatus(docIds, action as any)
+
+      if (result.success.length > 0) {
+        success(`Successfully updated ${result.success.length} reports`)
+        selectedReports.value = []
+        getAqauculture()
+      }
+
+      if (result.failed.length > 0) {
+        error(`Failed to update ${result.failed.length} reports`)
       }
     }
-
-    // Initialize bulk edit composable AFTER all function declarations
-    const {
-      selectedReports,
-      selectAll,
-      showBulkEditModal,
-      toggleReportSelection,
-      toggleSelectAll,
-      openBulkEditModal,
-      closeBulkEditModal,
-      handleBulkEditConfirm
-    } = useBulkEdit(aquaculture, useAquaculture(), getAqauculture)
 
     onMounted(() => {
       getAqauculture()
@@ -274,21 +382,23 @@ export default defineComponent({
 
     return {
       aquaculture,
-      action,
+      sortedAquaculture,
       decline_form,
       doc_id,
+      headers,
+      itemsPerPage,
+      selectedReports,
+      sortBy,
+      loading,
+      pagination,
+      loadNextPage,
+      performAction,
+      handleBulkAction,
+      getAqauculture,
       closeModal,
       getDate,
       findState,
-      fixLocation,
-      selectedReports,
-      selectAll,
-      showBulkEditModal,
-      toggleReportSelection,
-      toggleSelectAll,
-      openBulkEditModal,
-      closeBulkEditModal,
-      handleBulkEditConfirm
+      fixLocation
     }
   }
 })
@@ -296,561 +406,299 @@ export default defineComponent({
 
 <template>
   <div>
-    <div class="mb-4">
-      <button
-        v-if="selectedReports.size > 0"
-        @click="openBulkEditModal"
-        class="px-4 py-2 bg-blue-600 text-white rounded hover:bg-blue-700 transition-colors"
-      >
-        Bulk Edit Status ({{ selectedReports.size }} selected)
-      </button>
-    </div>
-    <div class="w-full overflow-x-auto">
-      <table class="w-7000 mb-10" id="aquaculture_to_excel">
-        <tr class="grid mt-8 mb-1 text-cool-gray-500 text-sm grid-cols-82">
-          <th class="col-span-2 bg-card-8 rounded-tl-md border-r border-cool-gray-200 px-3 py-3 shadow-md">
-            <div class="flex flex-col items-center gap-1">
-              <span class="text-xs font-semibold">Bulk Status Change</span>
-              <input
-                type="checkbox"
-                :checked="selectAll"
-                @change="toggleSelectAll"
-                class="cursor-pointer"
-              />
-            </div>
-          </th>
-          <th
-            class="col-span-1 bg-card-8 border-r border-cool-gray-200 px-3 py-3 shadow-md"
+    <BulkActionsToolbar
+      :selected-reports="selectedReports"
+      @bulk-action="handleBulkAction"
+      @clear-selection="selectedReports = []"
+    />
+
+    <!-- Vuetify Data Table -->
+    <v-data-table
+      v-model="selectedReports"
+      v-model:items-per-page="itemsPerPage"
+      v-model:sort-by="sortBy"
+      :headers="headers"
+      :items="sortedAquaculture"
+      :loading="loading"
+      show-select
+      return-object
+      item-value="doc_id"
+      class="elevation-1"
+      fixed-header
+      height="600px"
+    >
+      <!-- S/N Column -->
+      <template v-slot:item.index="{ index }">
+        {{ index + 1 }}
+      </template>
+
+      <!-- Created Date Column -->
+      <template v-slot:item.created_at="{ item }">
+        {{ getDate(item.created_at) }}
+      </template>
+
+      <!-- State / LGA Column -->
+      <template v-slot:item.state_lga="{ item }">
+        {{ findState(item.doc_id).state }} / {{ findState(item.doc_id).local_govt }}
+      </template>
+
+      <!-- Identifiers - Name of Farm -->
+      <template v-slot:item.identifiers.name_of_farm="{ item }">
+        {{ item.identifiers?.name_of_farm || '' }}
+      </template>
+
+      <!-- Identifiers - Town -->
+      <template v-slot:item.identifiers.town="{ item }">
+        {{ item.identifiers?.town || '' }}
+      </template>
+
+      <!-- Identifiers - Capacity -->
+      <template v-slot:item.identifiers.capacity="{ item }">
+        {{ item.identifiers?.capacity || '' }}
+      </template>
+
+      <!-- Identifiers - Selected Species -->
+      <template v-slot:item.identifiers.selected_species="{ item }">
+        {{ item.identifiers?.selected_species || '' }}
+      </template>
+
+      <!-- Identifiers - Latitude -->
+      <template v-slot:item.identifiers.my_coordinate.lat="{ item }">
+        {{ item.identifiers?.my_coordinate ? fixLocation(item.identifiers.my_coordinate.lat) : '' }}
+      </template>
+
+      <!-- Identifiers - Longitude -->
+      <template v-slot:item.identifiers.my_coordinate.lng="{ item }">
+        {{ item.identifiers?.my_coordinate ? fixLocation(item.identifiers.my_coordinate.lng) : '' }}
+      </template>
+
+      <!-- Identifiers - Owner Phone Number -->
+      <template v-slot:item.identifiers.owner_phone_number="{ item }">
+        {{ item.identifiers?.owner_phone_number || '' }}
+      </template>
+
+      <!-- Identifiers - Registration Type (Yes/No) -->
+      <template v-slot:item.identifiers.registration_type="{ item }">
+        {{ item.identifiers ? (item.identifiers.registration_type == '' ? 'No' : 'Yes') : '' }}
+      </template>
+
+      <!-- Identifiers - Registration Type Display -->
+      <template v-slot:item.identifiers.registration_type_display="{ item }">
+        {{ item.identifiers ? (item.identifiers.registration_type == '' ? 'None' : item.identifiers.registration_type) : '' }}
+      </template>
+
+      <!-- Identifiers - Fish Farm Association -->
+      <template v-slot:item.identifiers.fish_farm_association="{ item }">
+        {{ item.identifiers ? (item.identifiers.fish_farm_association == false ? 'No' : 'Yes') : '' }}
+      </template>
+
+      <!-- Identifiers - Pond Type -->
+      <template v-slot:item.identifiers.pond_type="{ item }">
+        {{ item.identifiers?.pond_type || '' }}
+      </template>
+
+      <!-- Passive Surveillance - Health Plan -->
+      <template v-slot:item.passive_surveillance.health_plan="{ item }">
+        {{ item.passive_surveillance ? (item.passive_surveillance.health_plan ? 'Yes' : 'No Health Plan') : '' }}
+      </template>
+
+      <!-- Passive Surveillance - Vet Attend To -->
+      <template v-slot:item.passive_surveillance.vet_attend_to="{ item }">
+        {{ item.passive_surveillance ? (item.passive_surveillance.vet_attend_to ? 'Yes' : 'No') : '' }}
+      </template>
+
+      <!-- Passive Surveillance - Practitioner Visit -->
+      <template v-slot:item.passive_surveillance.practitioner_visit="{ item }">
+        {{ item.passive_surveillance ? (item.passive_surveillance.practitioner_visit ? 'Yes' : 'No') : '' }}
+      </template>
+
+      <!-- Passive Surveillance - Fishes on Farm -->
+      <template v-slot:item.passive_surveillance.fishes_on_farm="{ item }">
+        {{ item.passive_surveillance?.fishes_on_farm || '' }}
+      </template>
+
+      <!-- Passive Surveillance - Mortality for Month -->
+      <template v-slot:item.passive_surveillance.mortality_for_month="{ item }">
+        {{ item.passive_surveillance?.mortality_for_month || '' }}
+      </template>
+
+      <!-- Passive Surveillance - Average Mortality Per Day -->
+      <template v-slot:item.passive_surveillance.average_mortality_per_day="{ item }">
+        {{ item.passive_surveillance?.average_mortality_per_day || '' }}
+      </template>
+
+      <!-- Water Quality - Recent Quality Test -->
+      <template v-slot:item.water_quality.recent_quality_test="{ item }">
+        {{ item.water_quality ? (item.water_quality.recent_quality_test ? 'Yes' : 'No') : '' }}
+      </template>
+
+      <!-- Water Quality - Organic Material -->
+      <template v-slot:item.water_quality.organic_material="{ item }">
+        {{ item.water_quality ? (item.water_quality.organic_material ? 'Yes' : 'No') : '' }}
+      </template>
+
+      <!-- Water Quality - Algae Available -->
+      <template v-slot:item.water_quality.algae_available="{ item }">
+        {{ item.water_quality ? (item.water_quality.algae_available ? 'Yes' : 'No') : '' }}
+      </template>
+
+      <!-- Water Quality - Test Type -->
+      <template v-slot:item.water_quality.test_type="{ item }">
+        <span v-if="item.water_quality?.test_type && Array.isArray(item.water_quality.test_type)">
+          {{ item.water_quality.test_type.join(', ') }}
+        </span>
+        <span v-else-if="item.water_quality?.test_type">
+          {{ item.water_quality.test_type }}
+        </span>
+      </template>
+
+      <!-- Water Quality - Change Pond Water -->
+      <template v-slot:item.water_quality.change_pond_water="{ item }">
+        {{ item.water_quality ? (item.water_quality.change_pond_water ? 'Yes' : 'No') : '' }}
+      </template>
+
+      <!-- Biosecurity Measures - Selected Bio Measures -->
+      <template v-slot:item.biosecurity_measures.selected_bio_measures="{ item }">
+        <v-select
+          v-if="item.biosecurity_measures?.selected_bio_measures?.length"
+          :items="item.biosecurity_measures.selected_bio_measures.map((m: any) => m.name)"
+          density="compact"
+          variant="outlined"
+          hide-details
+        ></v-select>
+        <span v-else>-</span>
+      </template>
+
+      <!-- Biosecurity Measures - Aquatic Available -->
+      <template v-slot:item.biosecurity_measures.aquatic_available="{ item }">
+        {{ item.biosecurity_measures ? (item.biosecurity_measures.aquatic_available ? 'Yes' : 'No') : '' }}
+      </template>
+
+      <!-- Disease Suspected - Viral -->
+      <template v-slot:item.disease_suspected.viral="{ item }">
+        {{ item.disease_suspected?.viral || '' }}
+      </template>
+
+      <!-- Disease Suspected - Bacterial -->
+      <template v-slot:item.disease_suspected.bacterial="{ item }">
+        {{ item.disease_suspected?.bacterial || '' }}
+      </template>
+
+      <!-- Disease Suspected - Fungal -->
+      <template v-slot:item.disease_suspected.fungal="{ item }">
+        {{ item.disease_suspected?.fungal || '' }}
+      </template>
+
+      <!-- Disease Suspected - Protozoan Parasitic -->
+      <template v-slot:item.disease_suspected.protozoan_parasitic="{ item }">
+        {{ item.disease_suspected?.protozoan_parasitic || '' }}
+      </template>
+
+      <!-- Disease Suspected - Helminth Parasitic -->
+      <template v-slot:item.disease_suspected.helminth_parasitic="{ item }">
+        {{ item.disease_suspected?.helminth_parasitic || '' }}
+      </template>
+
+      <!-- Disease Suspected - Leech Infestation -->
+      <template v-slot:item.disease_suspected.leech_infestation="{ item }">
+        {{ item.disease_suspected?.leech_infestation || '' }}
+      </template>
+
+      <!-- Disease Suspected - Environmental Diseases -->
+      <template v-slot:item.disease_suspected.environmental_diseases="{ item }">
+        {{ item.disease_suspected?.environmental_diseases || '' }}
+      </template>
+
+      <!-- Disease Suspected - Nutritional Diseases -->
+      <template v-slot:item.disease_suspected.nutritional_diseases="{ item }">
+        {{ item.disease_suspected?.nutritional_diseases || '' }}
+      </template>
+
+      <!-- OIE Listed Fish Pathogens -->
+      <template v-slot:item.oie_listed_fish_pathogens="{ item }">
+        <v-select
+          v-if="item.oie_listed_fish_pathogens?.length"
+          :items="item.oie_listed_fish_pathogens.map((p: any) => p.name)"
+          density="compact"
+          variant="outlined"
+          hide-details
+        ></v-select>
+        <span v-else>-</span>
+      </template>
+
+      <!-- Actions Column -->
+      <template v-slot:item.actions="{ item }">
+        <v-select
+          :items="[
+            { title: '-- Select Action --', value: '' },
+            ...(item.finished ? [{ title: 'In Progress', value: 'in_progress' }] : []),
+            ...(!item.approved ? [{ title: 'Approve', value: 'approve' }] : []),
+            ...(item.approved ? [{ title: 'Pending', value: 'pending' }] : []),
+            ...(item.finished ? [{ title: 'Decline', value: 'decline' }] : [])
+          ]"
+          density="compact"
+          variant="outlined"
+          hide-details
+          :model-value="''"
+          @update:model-value="(value: string) => value && performAction(value, item.doc_id)"
+        ></v-select>
+      </template>
+
+      <!-- Loading Slot -->
+      <template v-slot:loading>
+        <v-skeleton-loader type="table-row@10"></v-skeleton-loader>
+      </template>
+
+      <!-- No Data Slot -->
+      <template v-slot:no-data>
+        <div class="text-center py-8">
+          <div class="text-gray-500 text-lg">No reports found</div>
+          <div class="text-gray-400 text-sm mt-2">
+            Try adjusting your filters or check back later
+          </div>
+        </div>
+      </template>
+
+      <!-- Bottom Slot with Load More Button -->
+      <template v-slot:bottom>
+        <div class="text-center pa-4">
+          <v-btn
+            v-if="pagination.hasMore"
+            @click="loadNextPage"
+            :loading="loading"
+            color="primary"
+            variant="outlined"
           >
-            S/N
-          </th>
-          <th class="col-span-2 bg-card-8 border-r border-cool-gray-200 px-3 py-3 shadow-md">
-            Created Date
-          </th>
-          <th class="col-span-2 bg-card-8 border-r border-cool-gray-200 px-3 py-3 shadow-md">
-            Report State / LGA
-          </th>
-          <th class="col-span-3 bg-card-8 border-r border-cool-gray-200 px-3 py-3 shadow-md">
-            Name of Farm
-          </th>
-          <!-- <th
-            class="col-span-3 bg-card-8 border-r border-cool-gray-200 px-3 py-3 shadow-md"
-          >
-            Region /
-            <span>State</span>
-          </th>
-          <th
-            class="col-span-3 bg-card-8 border-r border-cool-gray-200 px-3 py-3 shadow-md"
-          >
-            Region /
-            <span>LGA</span>
-          </th> -->
-          <th class="col-span-3 bg-card-8 border-r border-cool-gray-200 px-3 py-3 shadow-md">
-            Region /
-            <span>Town/Village</span>
-          </th>
-          <th class="col-span-2 bg-card-8 border-r border-cool-gray-200 px-3 py-3 shadow-md">
-            Farm Capacity
-          </th>
-          <th class="col-span-2 bg-card-8 border-r border-cool-gray-200 px-3 py-3 shadow-md">
-            Species
-          </th>
-          <th class="col-span-2 bg-card-8 border-r border-cool-gray-200 px-3 py-3 shadow-md">
-            Location /
-            <span>Latitude</span>
-          </th>
-          <th class="col-span-2 bg-card-8 border-r border-cool-gray-200 px-3 py-3 shadow-md">
-            Location /
-            <span>Longitute</span>
-          </th>
-          <th class="col-span-2 bg-card-8 border-r border-cool-gray-200 px-3 py-3 shadow-md">
-            Owner's Phone Number
-          </th>
-          <th class="col-span-2 bg-card-8 border-r border-cool-gray-200 px-3 py-3 shadow-md">
-            Registration /
-            <span>Registered with Government?</span>
-          </th>
-          <th class="col-span-2 bg-card-8 border-r border-cool-gray-200 px-3 py-3 shadow-md">
-            Registration /
-            <span>Registration Type</span>
-          </th>
-          <th class="col-span-2 bg-card-8 border-r border-cool-gray-200 px-3 py-3 shadow-md">
-            Belong to Farmers Association?
-          </th>
-          <th class="col-span-2 bg-card-8 border-r border-cool-gray-200 px-3 py-3 shadow-md">
-            Type of Pond
-          </th>
-          <th class="col-span-2 bg-card-8 border-r border-cool-gray-200 px-3 py-3 shadow-md">
-            Passive Surveillance /
-            <span class="">Any health plan</span>
-          </th>
-          <th class="col-span-2 bg-card-8 border-r border-cool-gray-200 px-3 py-3 shadow-md">
-            Passive Surveillance /
-            <span class="">Vets attends to the health of aquatic species</span>
-          </th>
-          <th class="col-span-2 bg-card-8 border-r border-cool-gray-200 px-3 py-3 shadow-md">
-            Passive Surveillance /
-            <span class="">Health practitioner visits (bi-weekly)</span>
-          </th>
-          <th class="col-span-2 bg-card-8 border-r border-cool-gray-200 px-3 py-3 shadow-md">
-            Passive Surveillance /
-            <span class="">Fishes on the farm?</span>
-          </th>
-          <th class="col-span-2 bg-card-8 border-r border-cool-gray-200 px-3 py-3 shadow-md">
-            Passive Surveillance /
-            <span class="">Mortality for the month</span>
-          </th>
-          <th class="col-span-2 bg-card-8 border-r border-cool-gray-200 px-3 py-3 shadow-md">
-            Passive Surveillance /
-            <span class="">Average mortality per day</span>
-          </th>
-          <th class="col-span-2 bg-card-8 border-r border-cool-gray-200 px-3 py-3 shadow-md">
-            Water Quality /
-            <span class="">Recent Test</span>
-          </th>
-          <th class="col-span-2 bg-card-8 border-r border-cool-gray-200 px-3 py-3 shadow-md">
-            Water Quality /
-            <span class="">Contains organic materials and food debris?</span>
-          </th>
-          <th class="col-span-2 bg-card-8 border-r border-cool-gray-200 px-3 py-3 shadow-md">
-            Water Quality /
-            <span class="">Has Phytoplankton and algae available</span>
-          </th>
-          <th class="col-span-2 bg-card-8 border-r border-cool-gray-200 px-3 py-3 shadow-md">
-            Water Quality /
-            <span class="">Type of test normally done</span>
-          </th>
-          <th class="col-span-2 bg-card-8 border-r border-cool-gray-200 px-3 py-3 shadow-md">
-            Water Quality /
-            <span class="">Change pond water</span>
-          </th>
-          <th class="col-span-2 bg-card-8 border-r border-cool-gray-200 px-3 py-3 shadow-md">
-            Biosecurity Measures /
-            <span class="">Measures Seen</span>
-          </th>
-          <th class="col-span-2 bg-card-8 border-r border-cool-gray-200 px-3 py-3 shadow-md">
-            Biosecurity Measures /
-            <span class="">Other aquatic within 1km</span>
-          </th>
-          <th class="col-span-2 bg-card-8 border-r border-cool-gray-200 px-3 py-3 shadow-md">
-            Diseases Suspected /
-            <span class="">Viral</span>
-          </th>
-          <th class="col-span-2 bg-card-8 border-r border-cool-gray-200 px-3 py-3 shadow-md">
-            Diseases Suspected /
-            <span class="">Bacterial</span>
-          </th>
-          <th class="col-span-2 bg-card-8 border-r border-cool-gray-200 px-3 py-3 shadow-md">
-            Diseases Suspected /
-            <span class="">Fungal</span>
-          </th>
-          <th class="col-span-2 bg-card-8 border-r border-cool-gray-200 px-3 py-3 shadow-md">
-            Diseases Suspected /
-            <span class="">Protozoan parasitic</span>
-          </th>
-          <th class="col-span-2 bg-card-8 border-r border-cool-gray-200 px-3 py-3 shadow-md">
-            Diseases Suspected /
-            <span class="">Helminth parasitic</span>
-          </th>
-          <th class="col-span-2 bg-card-8 border-r border-cool-gray-200 px-3 py-3 shadow-md">
-            Diseases Suspected /
-            <span class="">Leech parasitic</span>
-          </th>
-          <th class="col-span-3 bg-card-8 border-r border-cool-gray-200 px-3 py-3 shadow-md">
-            Diseases Suspected /
-            <span class="">Environmental diseases</span>
-          </th>
-          <th class="col-span-5 bg-card-8 border-r border-cool-gray-200 px-3 py-3 shadow-md">
-            Diseases Suspected /
-            <span class="">Nutritional diseases</span>
-          </th>
-          <th class="col-span-3 bg-card-8 border-r border-cool-gray-200 px-3 py-3 shadow-md">
-            OIE listed fish pathogens (2020)
-          </th>
-          <th class="col-span-2 bg-card-8 border-r border-cool-gray-200 px-3 py-3 shadow-md">
-            Action
-          </th>
-        </tr>
-        <tr
-          class="grid text-cool-gray-500 w-7000 text-sm grid-cols-82"
-          v-for="(result, index) in aquaculture"
-          :key="index"
-        >
-          <td class="col-span-2 bg-card-8 border-r border-t border-cool-gray-200 px-3 py-3 flex items-center justify-center">
-            <input
-              type="checkbox"
-              :checked="selectedReports.has(result.doc_id)"
-              @change="toggleReportSelection(result.doc_id)"
-              class="cursor-pointer"
-            />
-          </td>
-          <td
-            class="col-span-1 bg-card-8 border-r border-t border-cool-gray-200 text-cool-gray-700 px-3 py-3"
-          >
-            {{ index + 1 }}
-          </td>
-          <td
-            class="col-span-2 bg-card-8 border-r border-t border-cool-gray-200 text-cool-gray-700 px-3 py-3"
-          >
-            {{ getDate(result.created_at) }}
-          </td>
-          <td
-            class="col-span-2 bg-card-8 border-r border-t border-cool-gray-200 text-cool-gray-700 px-3 py-3"
-          >
-            {{ findState(result.doc_id).state + ' / ' + findState(result.doc_id).local_govt }}
-          </td>
-          <td
-            class="col-span-3 bg-card-8 border-r border-t border-cool-gray-200 text-cool-gray-700 px-3 py-3"
-          >
-            {{ result.identifiers ? result.identifiers.name_of_farm : '' }}
-          </td>
-          <!-- <td
-            class="col-span-3 bg-card-8 border-r border-t border-cool-gray-200 text-cool-gray-700 px-3 py-3"
-          >
-            {{ result.identifiers ? result.identifiers.state : '' }}
-          </td>
-          <td
-            class="col-span-3 bg-card-8 border-r border-t border-cool-gray-200 text-cool-gray-700 px-3 py-3"
-          >
-            {{ result.identifiers ? result.identifiers.local_govt : '' }}
-          </td> -->
-          <td
-            class="col-span-3 bg-card-8 border-r border-t border-cool-gray-200 text-cool-gray-700 px-3 py-3"
-          >
-            {{ result.identifiers ? result.identifiers.town : '' }}
-          </td>
-          <td
-            class="col-span-2 bg-card-8 border-r border-t border-cool-gray-200 text-cool-gray-700 px-3 py-3"
-          >
-            {{ result.identifiers ? result.identifiers.capacity : '' }}
-          </td>
-          <td
-            class="col-span-2 bg-card-8 border-r border-t border-cool-gray-200 text-cool-gray-700 px-3 py-3"
-          >
-            {{ result.identifiers ? result.identifiers.selected_species : '' }}
-          </td>
-          <td
-            class="col-span-2 bg-card-8 border-r border-t border-cool-gray-200 text-cool-gray-700 px-3 py-3"
-          >
-            {{
-              result.identifiers
-                ? result.identifiers.my_coordinate
-                  ? fixLocation(result.identifiers.my_coordinate.lat)
-                  : ''
-                : ''
-            }}
-          </td>
-          <td
-            class="col-span-2 bg-card-8 border-r border-t border-cool-gray-200 text-cool-gray-700 px-3 py-3"
-          >
-            {{
-              result.identifiers
-                ? result.identifiers.my_coordinate
-                  ? fixLocation(result.identifiers.my_coordinate.lng)
-                  : ''
-                : ''
-            }}
-          </td>
-          <td
-            class="col-span-2 bg-card-8 border-r border-t border-cool-gray-200 text-cool-gray-700 px-3 py-3"
-          >
-            {{ result.identifiers ? result.identifiers.owner_phone_number : '' }}
-          </td>
-          <td
-            class="col-span-2 bg-card-8 border-r border-t border-cool-gray-200 text-cool-gray-700 px-3 py-3"
-          >
-            {{
-              result.identifiers ? (result.identifiers.registration_type == '' ? 'No' : 'Yes') : ''
-            }}
-          </td>
-          <td
-            class="col-span-2 bg-card-8 border-r border-t border-cool-gray-200 text-cool-gray-700 px-3 py-3"
-          >
-            {{
-              result.identifiers
-                ? result.identifiers.registration_type == ''
-                  ? 'None'
-                  : result.identifiers.registration_type
-                : ''
-            }}
-          </td>
-          <td
-            class="col-span-2 bg-card-8 border-r border-t border-cool-gray-200 text-cool-gray-700 px-3 py-3"
-          >
-            {{
-              result.identifiers
-                ? result.identifiers.fish_farm_association == false
-                  ? 'No'
-                  : 'Yes'
-                : ''
-            }}
-          </td>
-          <td
-            class="col-span-2 bg-card-8 border-r border-t border-cool-gray-200 text-cool-gray-700 px-3 py-3"
-          >
-            {{ result.identifiers ? result.identifiers.pond_type : '' }}
-          </td>
-          <td
-            class="col-span-2 bg-card-8 border-r border-t border-cool-gray-200 text-cool-gray-700 px-3 py-3"
-          >
-            {{
-              result.passive_surveillance
-                ? result.passive_surveillance.health_plan
-                  ? 'Yes'
-                  : 'No Health Plan'
-                : ''
-            }}
-          </td>
-          <td
-            class="col-span-2 bg-card-8 border-r border-t border-cool-gray-200 text-cool-gray-700 px-3 py-3"
-          >
-            {{
-              result.passive_surveillance
-                ? result.passive_surveillance.vet_attend_to
-                  ? 'Yes'
-                  : 'No'
-                : ''
-            }}
-          </td>
-          <td
-            class="col-span-2 bg-card-8 border-r border-t border-cool-gray-200 text-cool-gray-700 px-3 py-3"
-          >
-            {{
-              result.passive_surveillance
-                ? result.passive_surveillance.practitioner_visit
-                  ? 'Yes'
-                  : 'No'
-                : ''
-            }}
-          </td>
-          <td
-            class="col-span-2 bg-card-8 border-r border-t border-cool-gray-200 text-cool-gray-700 px-3 py-3"
-          >
-            {{
-              result.passive_surveillance
-                ? result.passive_surveillance.fishes_on_farm
-                  ? result.passive_surveillance.fishes_on_farm
-                  : ''
-                : ''
-            }}
-          </td>
-          <td
-            class="col-span-2 bg-card-8 border-r border-t border-cool-gray-200 text-cool-gray-700 px-3 py-3"
-          >
-            {{
-              result.passive_surveillance
-                ? result.passive_surveillance.mortality_for_month
-                  ? result.passive_surveillance.mortality_for_month
-                  : ''
-                : ''
-            }}
-          </td>
-          <td
-            class="col-span-2 bg-card-8 border-r border-t border-cool-gray-200 text-cool-gray-700 px-3 py-3"
-          >
-            {{
-              result.passive_surveillance
-                ? result.passive_surveillance.average_mortality_per_day
-                  ? result.passive_surveillance.average_mortality_per_day
-                  : ''
-                : ''
-            }}
-          </td>
-          <td
-            class="col-span-2 bg-card-8 border-r border-t border-cool-gray-200 text-cool-gray-700 px-3 py-3"
-          >
-            {{
-              result.water_quality ? (result.water_quality.recent_quality_test ? 'Yes' : 'No') : ''
-            }}
-          </td>
-          <td
-            class="col-span-2 bg-card-8 border-r border-t border-cool-gray-200 text-cool-gray-700 px-3 py-3"
-          >
-            {{ result.water_quality ? (result.water_quality.organic_material ? 'Yes' : 'No') : '' }}
-          </td>
-          <td
-            class="col-span-2 bg-card-8 border-r border-t border-cool-gray-200 text-cool-gray-700 px-3 py-3"
-          >
-            {{ result.water_quality ? (result.water_quality.algae_available ? 'Yes' : 'No') : '' }}
-          </td>
-          <td
-            class="col-span-2 bg-card-8 border-r border-t border-cool-gray-200 text-cool-gray-700 px-3 py-3"
-          >
-            <span v-if="result.water_quality">
-              <span
-                v-for="(test_type, index) in result.water_quality.test_type
-                  ? result.water_quality.test_type
-                  : ''"
-                :key="index"
-                >{{ test_type + ', ' }}</span
-              >
-            </span>
-            <span v-else>{{ ' ' }}</span>
-          </td>
-          <td
-            class="col-span-2 bg-card-8 border-r border-t border-cool-gray-200 text-cool-gray-700 px-3 py-3"
-          >
-            {{
-              result.water_quality ? (result.water_quality.change_pond_water ? 'Yes' : 'No') : ''
-            }}
-          </td>
-          <td
-            class="col-span-2 bg-card-8 border-r border-t border-cool-gray-200 text-cool-gray-700 px-3 py-3"
-          >
-            <select class="w-full py-1 bg-card-8 border-gray-200 focus:outline-none">
-              <option
-                v-for="(measures_seen, index) in result.biosecurity_measures.selected_bio_measures
-                  ? result.biosecurity_measures.selected_bio_measures
-                  : ''"
-                :key="index"
-              >
-                {{ measures_seen.name }}
-              </option>
-            </select>
-          </td>
-          <td
-            class="col-span-2 bg-card-8 border-r border-t border-cool-gray-200 text-cool-gray-700 px-3 py-3"
-          >
-            {{
-              result.biosecurity_measures
-                ? result.biosecurity_measures.aquatic_available
-                  ? 'Yes'
-                  : 'No'
-                : ''
-            }}
-          </td>
-          <td
-            class="col-span-2 bg-card-8 border-r border-t border-cool-gray-200 text-cool-gray-700 px-3 py-3"
-          >
-            {{
-              result.disease_suspected
-                ? result.disease_suspected.viral
-                  ? result.disease_suspected.viral
-                  : ''
-                : ''
-            }}
-          </td>
-          <td
-            class="col-span-2 bg-card-8 border-r border-t border-cool-gray-200 text-cool-gray-700 px-3 py-3"
-          >
-            {{
-              result.disease_suspected
-                ? result.disease_suspected.bacterial
-                  ? result.disease_suspected.bacterial
-                  : ''
-                : ''
-            }}
-          </td>
-          <td
-            class="col-span-2 bg-card-8 border-r border-t border-cool-gray-200 text-cool-gray-700 px-3 py-3"
-          >
-            {{
-              result.disease_suspected
-                ? result.disease_suspected.fungal
-                  ? result.disease_suspected.fungal
-                  : ''
-                : ''
-            }}
-          </td>
-          <td
-            class="col-span-2 bg-card-8 border-r border-t border-cool-gray-200 text-cool-gray-700 px-3 py-3"
-          >
-            {{
-              result.disease_suspected
-                ? result.disease_suspected.protozoan_parasitic
-                  ? result.disease_suspected.protozoan_parasitic
-                  : ''
-                : ''
-            }}
-          </td>
-          <td
-            class="col-span-2 bg-card-8 border-r border-t border-cool-gray-200 text-cool-gray-700 px-3 py-3"
-          >
-            {{
-              result.disease_suspected
-                ? result.disease_suspected.helminth_parasitic
-                  ? result.disease_suspected.helminth_parasitic
-                  : ''
-                : ''
-            }}
-          </td>
-          <td
-            class="col-span-2 bg-card-8 border-r border-t border-cool-gray-200 text-cool-gray-700 px-3 py-3"
-          >
-            {{
-              result.disease_suspected
-                ? result.disease_suspected.leech_infestation
-                  ? result.disease_suspected.leech_infestation
-                  : ''
-                : ''
-            }}
-          </td>
-          <td
-            class="col-span-3 bg-card-8 border-r border-t border-cool-gray-200 text-cool-gray-700 px-3 py-3"
-          >
-            {{
-              result.disease_suspected
-                ? result.disease_suspected.environmental_diseases
-                  ? result.disease_suspected.environmental_diseases
-                  : ''
-                : ''
-            }}
-          </td>
-          <td
-            class="col-span-5 bg-card-8 border-r border-t border-cool-gray-200 text-cool-gray-700 px-3 py-3"
-          >
-            {{
-              result.disease_suspected
-                ? result.disease_suspected.nutritional_diseases
-                  ? result.disease_suspected.nutritional_diseases
-                  : ''
-                : ''
-            }}
-          </td>
-          <td
-            class="col-span-3 bg-card-8 border-r border-t border-cool-gray-200 text-cool-gray-700 px-3 py-3"
-          >
-            <select class="w-full py-1 bg-card-8 border-gray-200 focus:outline-none">
-              <option
-                v-for="(pathogens, index) in result.oie_listed_fish_pathogens
-                  ? result.oie_listed_fish_pathogens
-                  : ''"
-                :key="index"
-              >
-                {{ pathogens.name }}
-              </option>
-            </select>
-          </td>
-          <td class="col-span-2 bg-card-8 border-r border-t border-cool-gray-200 px-3 py-3">
-            <select class="px-2 py-1 text-sm bg-card-8 focus:outline-none" v-model="action">
-              <option value="">-- Select Action --</option>
-              <option :value="'in_progress_' + index" v-if="result.finished">In Progress</option>
-              <option :value="'approve_' + index" v-if="!result.approved">Approve</option>
-              <option :value="'pending_' + index" v-if="result.approved">Pending</option>
-              <option :value="'decline_' + index" v-if="result.finished">Decline</option>
-            </select>
-          </td>
-        </tr>
-      </table>
-    </div>
+            Load More
+          </v-btn>
+          <div v-else class="text-sm text-gray-500">
+            All reports loaded ({{ aquaculture.length }} total)
+          </div>
+        </div>
+      </template>
+    </v-data-table>
+
+    <!-- Decline Form Modal -->
     <aquaculture-decline-form
       v-if="decline_form"
       :full="full"
       :doc_id="doc_id"
       @open-form="closeModal"
     ></aquaculture-decline-form>
-
-    <bulk-edit-modal
-      v-if="showBulkEditModal"
-      :selected-count="selectedReports.size"
-      @close="closeBulkEditModal"
-      @confirm="handleBulkEditConfirm"
-    ></bulk-edit-modal>
   </div>
 </template>
 
+<style scoped src="./GenericDataTableStyles.css"></style>
 <style scoped>
-.w-7000 {
-  width: 7000px;
+:deep(.v-data-table) {
+  background-color: white;
+}
+
+:deep(.v-data-table__th) {
+  background-color: white !important;
+}
+
+:deep(.v-table__wrapper) {
+  background-color: white;
 }
 </style>
