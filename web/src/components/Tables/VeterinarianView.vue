@@ -10,7 +10,8 @@ import {
   createFindStateFunction,
   createFixLocationFunction,
   createGetDateFunction,
-  createSortedComputed
+  createSortedComputed,
+  createPaginationHandlers
 } from './GenericDataTableView.vue'
 
 // Define TypeScript interface for Veterinarian report
@@ -65,33 +66,78 @@ export default defineComponent({
     const itemsPerPage = ref(20)
     const selectedReports = ref<VeterinarianReport[]>([])
     const sortBy = ref<any[]>([{ key: 'created_at', order: 'desc' }])
+    const currentPage = ref(1)
 
     const sortedVeterinarian = computed(createSortedComputed(veterinarian, sortBy))
 
-    // Define table headers
-    const headers = ref([
-      { title: 'S/N', key: 'index', sortable: false, width: 60 },
-      { title: 'Created Date', key: 'date', sortable: true, width: 140 },
-      { title: 'Report State - LGA', key: 'state_lga', sortable: false, width: 180 },
-      { title: 'Name of Clinic - Hospital', key: 'name_of_hospital', sortable: false, width: 220 },
-      { title: 'Type of Report', key: 'type_of_report', sortable: false, width: 150 },
-      { title: 'Location - Latitude', key: 'location.lat', sortable: false, width: 160 },
-      { title: 'Location - Longitude', key: 'location.lng', sortable: false, width: 160 },
-      { title: 'Disease Suspected', key: 'disease', sortable: false, width: 160 },
-      { title: 'Other Diseases', key: 'other_diseases', sortable: false, width: 160 },
-      { title: 'Type of Animal', key: 'species', sortable: false, width: 150 },
-      { title: 'Age', key: 'age', sortable: false, width: 100 },
-      { title: 'Sex', key: 'sex', sortable: false, width: 100 },
-      { title: 'Address of Affected Farm', key: 'address_affected_farm', sortable: false, width: 220 },
-      { title: 'Diagnosis', key: 'diagnosis', sortable: false, width: 150 },
-      { title: 'Measures', key: 'measures', sortable: false, width: 150 },
-      { title: 'Action', key: 'actions', sortable: false, width: 180 }
-    ])
+    // Dynamic table configuration based on data availability
+    const tableConfig = computed(() => {
+      const dataCount = sortedVeterinarian.value.length
+      // Use fixed height only when there are enough rows to benefit from scrolling
+      const needsScrolling = dataCount > 10
+      return {
+        height: needsScrolling ? '600px' : 'auto',
+        fixedHeader: needsScrolling
+      }
+    })
+
+    // Create reactive values for pagination
+    const valuesRef = computed(() => {
+      let sort = false
+      let progress = false
+      if (selected_category.value == 'Approved') {
+        sort = true
+        progress = false
+      } else if (selected_category.value == 'Pending') {
+        sort = false
+        progress = false
+      } else if (selected_category.value == 'In Progress') {
+        sort = false
+        progress = true
+      }
+
+      return {
+        category: sort,
+        state: selected_state.value,
+        in_progress: progress
+      }
+    })
+
+    // Create pagination handlers
+    const { handlePageChange, handlePageSizeChange } = createPaginationHandlers(
+      useVeterinarian(),
+      valuesRef
+    )
+
+    // Column visibility control
+    const columnVisibilityLevel = ref(3)
+    const allColumns = [
+      { title: 'S/N', key: 'index', sortable: false, width: 60, priority: 1 },
+      { title: 'Created Date', key: 'date', sortable: true, width: 140, priority: 1 },
+      { title: 'State - LGA', key: 'state_lga', sortable: false, width: 150, priority: 1 },
+      { title: 'Hospital/Clinic', key: 'name_of_hospital', sortable: false, width: 180, priority: 2 },
+      { title: 'Report Type', key: 'type_of_report', sortable: false, width: 130, priority: 2 },
+      { title: 'Latitude', key: 'location.lat', sortable: false, width: 100, priority: 5 },
+      { title: 'Longitude', key: 'location.lng', sortable: false, width: 100, priority: 5 },
+      { title: 'Disease Suspected', key: 'disease', sortable: false, width: 140, priority: 2 },
+      { title: 'Other Diseases', key: 'other_diseases', sortable: false, width: 130, priority: 4 },
+      { title: 'Animal Type', key: 'species', sortable: false, width: 120, priority: 2 },
+      { title: 'Age', key: 'age', sortable: false, width: 80, priority: 3 },
+      { title: 'Sex', key: 'sex', sortable: false, width: 80, priority: 3 },
+      { title: 'Farm Address', key: 'address_affected_farm', sortable: false, width: 160, priority: 4 },
+      { title: 'Diagnosis', key: 'diagnosis', sortable: false, width: 130, priority: 3 },
+      { title: 'Measures', key: 'measures', sortable: false, width: 130, priority: 3 },
+      { title: 'Action', key: 'actions', sortable: false, width: 120, priority: 1 }
+    ]
+    
+    const headers = computed(() => allColumns.filter(col => col.priority <= columnVisibilityLevel.value))
 
     watch(selected_category, () => {
+      currentPage.value = 1
       getVeterinarian()
     })
     watch(selected_state, () => {
+      currentPage.value = 1
       getVeterinarian()
     })
     watch(successful, () => {
@@ -102,50 +148,8 @@ export default defineComponent({
     })
 
     const getVeterinarian = () => {
-      let sort = false
-      let progress = false
-      if (selected_category.value == 'Approved') {
-        sort = true
-        progress = false
-      } else if (selected_category.value == 'Pending') {
-        sort = false
-        progress = false
-      } else if (selected_category.value == 'In Progress') {
-        sort = false
-        progress = true
-      }
-
-      var values = {
-        category: sort,
-        state: selected_state.value,
-        in_progress: progress
-      }
-      useVeterinarian().getVeterinarian(values)
-    }
-
-    const loadNextPage = () => {
-      let sort = false
-      let progress = false
-      if (selected_category.value == 'Approved') {
-        sort = true
-        progress = false
-      } else if (selected_category.value == 'Pending') {
-        sort = false
-        progress = false
-      } else if (selected_category.value == 'In Progress') {
-        sort = false
-        progress = true
-      }
-
-      const values = {
-        category: sort,
-        state: selected_state.value,
-        in_progress: progress
-      }
-
-      if (pagination.value.hasMore && !loading.value) {
-        useVeterinarian().loadNextPage(values)
-      }
+      // Use the new page-based method for traditional pagination
+      useVeterinarian().getVeterinarianPage(valuesRef.value, currentPage.value, itemsPerPage.value)
     }
 
     const getDate = createGetDateFunction(months)
@@ -322,21 +326,26 @@ export default defineComponent({
     return {
       veterinarian,
       sortedVeterinarian,
+      tableConfig,
       decline_form,
       doc_id,
       headers,
+      allColumns,
+      columnVisibilityLevel,
       itemsPerPage,
       selectedReports,
       sortBy,
+      currentPage,
       getDate,
       findState,
       fixLocation,
       closeModal,
       loading,
       pagination,
-      loadNextPage,
       performAction,
-      handleBulkAction
+      handleBulkAction,
+      handlePageChange,
+      handlePageSizeChange
     }
   }
 })
@@ -350,20 +359,66 @@ export default defineComponent({
       @clear-selection="selectedReports = []"
     />
 
+    <!-- Column Visibility Controls -->
+    <v-card class="mb-4 pa-3" elevation="1">
+      <div class="d-flex align-center gap-3">
+        <span class="text-subtitle-2 text-medium-emphasis">Column View:</span>
+        <v-btn-toggle
+          v-model="columnVisibilityLevel"
+          variant="outlined"
+          size="small"
+          mandatory
+        >
+          <v-btn :value="2" size="small">
+            Essential
+            <v-tooltip activator="parent" location="top">
+              Show only the most important columns ({{ allColumns.filter(c => c.priority <= 2).length }} columns)
+            </v-tooltip>
+          </v-btn>
+          <v-btn :value="3" size="small">
+            Standard
+            <v-tooltip activator="parent" location="top">
+              Show standard view ({{ allColumns.filter(c => c.priority <= 3).length }} columns)
+            </v-tooltip>
+          </v-btn>
+          <v-btn :value="4" size="small">
+            Detailed
+            <v-tooltip activator="parent" location="top">
+              Show detailed view ({{ allColumns.filter(c => c.priority <= 4).length }} columns)
+            </v-tooltip>
+          </v-btn>
+          <v-btn :value="5" size="small">
+            Complete
+            <v-tooltip activator="parent" location="top">
+              Show all columns ({{ allColumns.length }} columns)
+            </v-tooltip>
+          </v-btn>
+        </v-btn-toggle>
+        <v-spacer></v-spacer>
+        <span class="text-caption text-medium-emphasis">
+          Showing {{ headers.length }} of {{ allColumns.length }} columns
+        </span>
+      </div>
+    </v-card>
+
     <!-- Vuetify Data Table -->
     <v-data-table
       v-model="selectedReports"
       v-model:items-per-page="itemsPerPage"
+      v-model:page="currentPage"
       v-model:sort-by="sortBy"
       :headers="headers"
       :items="sortedVeterinarian"
+      :items-length="pagination.totalCount"
       :loading="loading"
       show-select
       return-object
       item-value="doc_id"
       class="elevation-1"
-      fixed-header
-      height="600px"
+      :fixed-header="tableConfig.fixedHeader"
+      :height="tableConfig.height"
+      @update:page="handlePageChange"
+      @update:items-per-page="handlePageSizeChange"
     >
       <!-- Serial Number Column -->
       <template v-slot:item.index="{ index }">
@@ -419,24 +474,6 @@ export default defineComponent({
           <div class="text-gray-500 text-lg">No reports found</div>
           <div class="text-gray-400 text-sm mt-2">
             Try adjusting your filters or check back later
-          </div>
-        </div>
-      </template>
-
-      <!-- Bottom Slot for Load More -->
-      <template v-slot:bottom>
-        <div class="text-center pa-4">
-          <v-btn
-            v-if="pagination.hasMore"
-            @click="loadNextPage"
-            :loading="loading"
-            color="primary"
-            variant="outlined"
-          >
-            Load More
-          </v-btn>
-          <div v-else class="text-sm text-gray-500">
-            All reports loaded ({{ veterinarian.length }} total)
           </div>
         </div>
       </template>

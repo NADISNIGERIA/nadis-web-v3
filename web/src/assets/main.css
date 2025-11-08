@@ -2,6 +2,47 @@
 @tailwind components;
 @tailwind utilities;
 
+/* SweetAlert custom styles for green theme */
+.swal-confirm-green {
+  background-color: #005304 !important;
+  color: white !important;
+  border: none !important;
+}
+
+.swal-confirm-green:hover {
+  background-color: #004D17 !important;
+  color: white !important;
+}
+
+/* Ensure white text on all green backgrounds */
+.bg-primary,
+.bg-primary-2,
+.bg-green-500,
+.bg-green-600,
+.bg-green-700,
+.bg-green-800,
+.bg-green-900 {
+  color: white !important;
+}
+
+/* Ensure white text on primary color backgrounds */
+[style*="background-color: #006722"],
+[style*="background-color: #005304"],
+[style*="background-color: #004D17"] {
+  color: white !important;
+}
+
+/* Specific targeting for elements that might not inherit properly */
+.bg-primary *,
+.bg-primary-2 *,
+.bg-green-500 *,
+.bg-green-600 *,
+.bg-green-700 *,
+.bg-green-800 *,
+.bg-green-900 * {
+  color: white !important;
+}
+
 div,
 a,
 svg {

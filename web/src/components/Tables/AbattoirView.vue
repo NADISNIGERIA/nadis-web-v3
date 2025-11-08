@@ -11,7 +11,8 @@ import {
   createFindStateFunction,
   createFixLocationFunction,
   createGetDateFunction,
-  createSortedComputed
+  createSortedComputed,
+  createPaginationHandlers
 } from './GenericDataTableView.vue'
 
 // Define TypeScript interface for Abattoir report
@@ -90,47 +91,102 @@ export default defineComponent({
     const itemsPerPage = ref(20)
     const selectedReports = ref<AbattoirReport[]>([])
     const sortBy = ref<any[]>([{ key: 'created_at', order: 'desc' }])
+    const currentPage = ref(1)
 
     const sortedAbattoir = computed(createSortedComputed(abattoir, sortBy))
 
-    // Define table headers
-    const headers = ref([
-      { title: 'S/N', key: 'index', sortable: false, width: 60 },
-      { title: 'Created Date', key: 'created_at', sortable: true, width: 120 },
-      { title: 'Report State / LGA', key: 'state_lga', sortable: false, width: 150 },
-      { title: 'Disease Suspected', key: 'disease_name', sortable: true, width: 150 },
-      { title: 'Other Diseases', key: 'other_diseases', sortable: false, width: 150 },
-      { title: 'Abattoir Name', key: 'name_of_abattoir', sortable: true, width: 150 },
-      { title: 'Address', key: 'address', sortable: false, width: 200 },
-      { title: 'Holding Capacity', key: 'holding_capacity', sortable: true, width: 120 },
-      { title: 'Location Lat', key: 'location.lat', sortable: false, width: 120 },
-      { title: 'Location Lng', key: 'location.lng', sortable: false, width: 120 },
-      { title: 'Species', key: 'species', sortable: false, width: 120 },
-      { title: 'Other Species', key: 'other_species', sortable: false, width: 120 },
-      { title: 'Source of Animals', key: 'source_of_animal', sortable: false, width: 150 },
-      { title: 'Disease Suspected', key: 'disease_suspected', sortable: false, width: 150 },
-      { title: 'Inspected', key: 'animal_inspection.inspected', sortable: false, width: 100 },
-      { title: 'Rejected', key: 'animal_inspection.rejected', sortable: false, width: 100 },
-      { title: 'Reason for Rejection', key: 'animal_inspection.reason_for_rejection', sortable: false, width: 180 },
-      { title: 'Slaughtered per day', key: 'slaughter_figure', sortable: false, width: 120 },
-      { title: 'Ante Mortem - Inspected', key: 'anti_mortem.inspected', sortable: false, width: 140 },
-      { title: 'Ante Mortem - Appearance', key: 'anti_mortem.appearance', sortable: false, width: 140 },
-      { title: 'Post Mortem - Organs Suspected', key: 'post_mortem_inspection.total_organs_suspected', sortable: false, width: 160 },
-      { title: 'Post Mortem - Lesion Seen', key: 'post_mortem_inspection.legion_seen', sortable: false, width: 150 },
-      { title: 'Post Mortem - No. Condemned', key: 'post_mortem_inspection.number_suspected', sortable: false, width: 150 },
-      { title: 'Partially Condemned', key: 'partially_condemned', sortable: false, width: 150 },
-      { title: 'Totally Condemned', key: 'totally_condemned', sortable: false, width: 150 },
-      { title: 'Samples Collected', key: 'sample_information.samples_collected', sortable: false, width: 140 },
-      { title: 'Sample Date', key: 'sample_information.date', sortable: false, width: 120 },
-      { title: 'Samples Submitted', key: 'sample_information.number_of_sample_submitted', sortable: false, width: 140 },
-      { title: 'By-Product', key: 'by_products', sortable: false, width: 120 },
-      { title: 'Action', key: 'actions', sortable: false, width: 150 }
-    ])
+    // Dynamic table configuration based on data availability
+    const tableConfig = computed(() => {
+      const dataCount = sortedAbattoir.value.length
+      // Use fixed height only when there are enough rows to benefit from scrolling
+      const needsScrolling = dataCount > 10
+      return {
+        height: needsScrolling ? '600px' : 'auto',
+        fixedHeader: needsScrolling
+      }
+    })
+
+    // Create reactive values for pagination
+    const valuesRef = computed(() => {
+      let sort = false
+      let progress = false
+      if (selected_category.value == 'Approved') {
+        sort = true
+        progress = false
+      } else if (selected_category.value == 'Pending') {
+        sort = false
+        progress = false
+      } else if (selected_category.value == 'In Progress') {
+        sort = false
+        progress = true
+      }
+
+      return {
+        category: sort,
+        state: selected_state.value,
+        in_progress: progress
+      }
+    })
+
+    // Create pagination handlers
+    const { handlePageChange, handlePageSizeChange } = createPaginationHandlers(
+      useAbattoir(),
+      valuesRef
+    )
+
+    // Define all available columns with priority levels for responsive display
+    const allColumns = [
+      { title: 'S/N', key: 'index', sortable: false, width: 60, priority: 1 },
+      { title: 'Created Date', key: 'created_at', sortable: true, width: 120, priority: 1 },
+      { title: 'State / LGA', key: 'state_lga', sortable: false, width: 140, priority: 1 },
+      { title: 'Disease Suspected', key: 'disease_name', sortable: true, width: 140, priority: 2 },
+      { title: 'Other Diseases', key: 'other_diseases', sortable: false, width: 120, priority: 4 },
+      { title: 'Abattoir Name', key: 'name_of_abattoir', sortable: true, width: 140, priority: 2 },
+      { title: 'Address', key: 'address', sortable: false, width: 150, priority: 3 },
+      { title: 'Holding Capacity', key: 'holding_capacity', sortable: true, width: 120, priority: 3 },
+      { title: 'Latitude', key: 'location.lat', sortable: false, width: 100, priority: 5 },
+      { title: 'Longitude', key: 'location.lng', sortable: false, width: 100, priority: 5 },
+      { title: 'Species', key: 'species', sortable: false, width: 110, priority: 2 },
+      { title: 'Other Species', key: 'other_species', sortable: false, width: 120, priority: 4 },
+      { title: 'Source of Animals', key: 'source_of_animal', sortable: false, width: 140, priority: 3 },
+      { title: 'Disease Suspected', key: 'disease_suspected', sortable: false, width: 140, priority: 4 },
+      { title: 'Inspected', key: 'animal_inspection.inspected', sortable: false, width: 100, priority: 3 },
+      { title: 'Rejected', key: 'animal_inspection.rejected', sortable: false, width: 100, priority: 3 },
+      { title: 'Rejection Reason', key: 'animal_inspection.reason_for_rejection', sortable: false, width: 150, priority: 4 },
+      { title: 'Slaughtered/day', key: 'slaughter_figure', sortable: false, width: 120, priority: 3 },
+      { title: 'AM - Inspected', key: 'anti_mortem.inspected', sortable: false, width: 120, priority: 4 },
+      { title: 'AM - Appearance', key: 'anti_mortem.appearance', sortable: false, width: 120, priority: 4 },
+      { title: 'PM - Organs Suspected', key: 'post_mortem_inspection.total_organs_suspected', sortable: false, width: 140, priority: 4 },
+      { title: 'PM - Lesion Seen', key: 'post_mortem_inspection.legion_seen', sortable: false, width: 130, priority: 4 },
+      { title: 'PM - Condemned', key: 'post_mortem_inspection.number_suspected', sortable: false, width: 130, priority: 4 },
+      { title: 'Partially Condemned', key: 'partially_condemned', sortable: false, width: 140, priority: 5 },
+      { title: 'Totally Condemned', key: 'totally_condemned', sortable: false, width: 140, priority: 5 },
+      { title: 'Samples Collected', key: 'sample_information.samples_collected', sortable: false, width: 130, priority: 5 },
+      { title: 'Sample Date', key: 'sample_information.date', sortable: false, width: 110, priority: 5 },
+      { title: 'Samples Submitted', key: 'sample_information.number_of_sample_submitted', sortable: false, width: 130, priority: 5 },
+      { title: 'By-Product', key: 'by_products', sortable: false, width: 110, priority: 5 },
+      { title: 'Action', key: 'actions', sortable: false, width: 120, priority: 1 }
+    ]
+
+    // Column visibility controls
+    const columnVisibilityLevel = ref(3) // Show priorities 1-3 by default
+    
+    // Responsive headers based on user preference
+    const headers = computed(() => {
+      return allColumns.filter(col => col.priority <= columnVisibilityLevel.value)
+    })
+
+    // Toggle more/fewer columns
+    const toggleColumnVisibility = (level: number) => {
+      columnVisibilityLevel.value = level
+    }
 
     watch(selected_category, () => {
+      currentPage.value = 1
       getAbattoir()
     })
     watch(selected_state, () => {
+      currentPage.value = 1
       getAbattoir()
     })
     watch(successful, () => {
@@ -141,52 +197,8 @@ export default defineComponent({
     })
 
     const getAbattoir = () => {
-      let sort = false
-      let progress = false
-      if (selected_category.value == 'Approved') {
-        sort = true
-        progress = false
-      } else if (selected_category.value == 'Pending') {
-        sort = false
-        progress = false
-      } else if (selected_category.value == 'In Progress') {
-        sort = false
-        progress = true
-      }
-
-      const values = {
-        category: sort,
-        state: selected_state.value,
-        in_progress: progress
-      }
-      if (selected_state.value != undefined || selected_state.value !== '') {
-        useAbattoir().getAbattoir(values)
-      }
-    }
-
-    const loadNextPage = () => {
-      let sort = false
-      let progress = false
-      if (selected_category.value == 'Approved') {
-        sort = true
-        progress = false
-      } else if (selected_category.value == 'Pending') {
-        sort = false
-        progress = false
-      } else if (selected_category.value == 'In Progress') {
-        sort = false
-        progress = true
-      }
-
-      const values = {
-        category: sort,
-        state: selected_state.value,
-        in_progress: progress
-      }
-
-      if (pagination.value.hasMore && !loading.value) {
-        useAbattoir().loadNextPage(values)
-      }
+      // Use the new page-based method for traditional pagination
+      useAbattoir().getAbattoirPage(valuesRef.value, currentPage.value, itemsPerPage.value)
     }
 
     const getDate = createGetDateFunction(months)
@@ -363,21 +375,27 @@ export default defineComponent({
     return {
       abattoir,
       sortedAbattoir,
+      tableConfig,
       decline_form,
       doc_id,
       headers,
+      allColumns,
+      columnVisibilityLevel,
+      toggleColumnVisibility,
       itemsPerPage,
       selectedReports,
       sortBy,
+      currentPage,
       getDate,
       findState,
       fixLocation,
       closeModal,
       loading,
       pagination,
-      loadNextPage,
       performAction,
-      handleBulkAction
+      handleBulkAction,
+      handlePageChange,
+      handlePageSizeChange
     }
   }
 })
@@ -391,20 +409,66 @@ export default defineComponent({
       @clear-selection="selectedReports = []"
     />
 
+    <!-- Column Visibility Controls -->
+    <v-card class="mb-4 pa-3" elevation="1">
+      <div class="d-flex align-center gap-3">
+        <span class="text-subtitle-2 text-medium-emphasis">Column View:</span>
+        <v-btn-toggle
+          v-model="columnVisibilityLevel"
+          variant="outlined"
+          size="small"
+          mandatory
+        >
+          <v-btn :value="2" size="small">
+            Essential
+            <v-tooltip activator="parent" location="top">
+              Show only the most important columns ({{ allColumns.filter(c => c.priority <= 2).length }} columns)
+            </v-tooltip>
+          </v-btn>
+          <v-btn :value="3" size="small">
+            Standard
+            <v-tooltip activator="parent" location="top">
+              Show standard view ({{ allColumns.filter(c => c.priority <= 3).length }} columns)
+            </v-tooltip>
+          </v-btn>
+          <v-btn :value="4" size="small">
+            Detailed
+            <v-tooltip activator="parent" location="top">
+              Show detailed view ({{ allColumns.filter(c => c.priority <= 4).length }} columns)
+            </v-tooltip>
+          </v-btn>
+          <v-btn :value="5" size="small">
+            Complete
+            <v-tooltip activator="parent" location="top">
+              Show all columns ({{ allColumns.length }} columns)
+            </v-tooltip>
+          </v-btn>
+        </v-btn-toggle>
+        <v-spacer></v-spacer>
+        <span class="text-caption text-medium-emphasis">
+          Showing {{ headers.length }} of {{ allColumns.length }} columns
+        </span>
+      </div>
+    </v-card>
+
     <!-- Vuetify Data Table -->
     <v-data-table
       v-model="selectedReports"
       v-model:items-per-page="itemsPerPage"
       v-model:sort-by="sortBy"
+      v-model:page="currentPage"
       :headers="headers"
       :items="sortedAbattoir"
       :loading="loading"
+      :items-length="pagination.totalCount"
       show-select
       return-object
       item-value="doc_id"
       class="elevation-1"
-      fixed-header
-      height="600px"
+      :fixed-header="tableConfig.fixedHeader"
+      :height="tableConfig.height"
+      @update:page="handlePageChange"
+      @update:items-per-page="handlePageSizeChange"
     >
       <!-- Serial Number Column -->
       <template v-slot:item.index="{ index }">
@@ -550,24 +614,6 @@ export default defineComponent({
           <div class="text-gray-500 text-lg">No reports found</div>
           <div class="text-gray-400 text-sm mt-2">
             Try adjusting your filters or check back later
-          </div>
-        </div>
-      </template>
-
-      <!-- Bottom Slot for Load More -->
-      <template v-slot:bottom>
-        <div class="text-center pa-4">
-          <v-btn
-            v-if="pagination.hasMore"
-            @click="loadNextPage"
-            :loading="loading"
-            color="primary"
-            variant="outlined"
-          >
-            Load More
-          </v-btn>
-          <div v-else class="text-sm text-gray-500">
-            All reports loaded ({{ abattoir.length }} total)
           </div>
         </div>
       </template>

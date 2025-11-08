@@ -79,7 +79,7 @@
               toast.type === 'success' ? 'text-green-200 hover:text-green-100' : '',
               toast.type === 'error' ? 'text-red-200 hover:text-red-100' : '',
               toast.type === 'warning' ? 'text-yellow-200 hover:text-yellow-100' : '',
-              toast.type === 'info' ? 'text-blue-200 hover:text-blue-100' : ''
+              toast.type === 'info' ? 'text-green-200 hover:text-green-100' : ''
             ]"
           >
             <svg class="w-4 h-4" fill="currentColor" viewBox="0 0 20 20">
@@ -105,7 +105,7 @@ const toastClasses = {
   success: 'bg-green-500 text-white',
   error: 'bg-red-500 text-white',
   warning: 'bg-yellow-500 text-white',
-  info: 'bg-blue-500 text-white'
+  info: 'bg-green-500 text-white'
 }
 </script>
 

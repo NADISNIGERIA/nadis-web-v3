@@ -1014,6 +1014,17 @@ export default defineComponent({
     ])
     const show_category = ref(false)
     const show_state = ref(false)
+    const search_state = ref('')
+    
+    // Filtered states based on search
+    const filteredStates = computed(() => {
+      if (!search_state.value) {
+        return states.value
+      }
+      return states.value.filter(state => 
+        state.name.toLowerCase().includes(search_state.value.toLowerCase())
+      )
+    })
     // Improved: Single state management
     enum ReportType {
       ABATTOIR = 'abattoir',
@@ -1149,13 +1160,16 @@ export default defineComponent({
     }
     const selectState = async (index: any) => {
       if (index === 'All States') {
-        selected_state.value = index
-        show_state.value = false
+        selected_state.value = 'All States'
       } else {
-        const state = states.value[index].name
-        selected_state.value = state
-        show_state.value = false
+        // Get state from filtered results
+        const selectedState = filteredStates.value[index]
+        if (selectedState) {
+          selected_state.value = selectedState.name
+        }
       }
+      show_state.value = false
+      search_state.value = '' // Reset search when selection is made
       // Refresh stats when state changes
       await fetchReportStats()
     }
@@ -1362,6 +1376,8 @@ export default defineComponent({
       show_category,
       selected_category,
       selected_state,
+      search_state,
+      filteredStates,
       isUserAlreadySignedIn,
       isLoading,
       error,
@@ -1421,10 +1437,10 @@ export default defineComponent({
     </div>
 
     <!-- Loading Overlay for Tab Switching -->
-    <div v-if="isLoading" class="mx-5 mt-4 p-4 bg-blue-50 border border-blue-200 rounded-md">
+    <div v-if="isLoading" class="mx-5 mt-4 p-4 bg-green-50 border border-green-200 rounded-md">
       <div class="flex items-center">
-        <div class="animate-spin rounded-full h-5 w-5 border-b-2 border-blue-600"></div>
-        <span class="ml-2 text-blue-800">Switching report type...</span>
+        <div class="animate-spin rounded-full h-5 w-5 border-b-2 border-green-600"></div>
+        <span class="ml-2 text-green-800">Switching report type...</span>
       </div>
     </div>
     
@@ -1438,6 +1454,7 @@ export default defineComponent({
             'bg-primary hover:bg-primary-2 text-white': abattoir,
             'text-gray-400 hover:border-gray-300 border border-white': !abattoir
           }"
+          :style="abattoir ? 'background-color: #006722 !important;' : ''"
         >
           Abattoir Disease
         </div>
@@ -1449,6 +1466,7 @@ export default defineComponent({
             'bg-primary hover:bg-primary-2 text-white': outbreak,
             'text-gray-400 hover:border-gray-300 border border-white': !outbreak
           }"
+          :style="outbreak ? 'background-color: #006722 !important;' : ''"
         >
           Outbreak
         </div>
@@ -1460,6 +1478,7 @@ export default defineComponent({
             'bg-primary hover:bg-primary-2 text-white': vaccination,
             'text-gray-400 hover:border-gray-300 border border-white': !vaccination
           }"
+          :style="vaccination ? 'background-color: #006722 !important;' : ''"
         >
           Vaccination
         </div>
@@ -1471,6 +1490,7 @@ export default defineComponent({
             'bg-primary hover:bg-primary-2 text-white': suspicion,
             'text-gray-400 hover:border-gray-300 border border-white': !suspicion
           }"
+          :style="suspicion ? 'background-color: #006722 !important;' : ''"
         >
           Disease Suspicion
         </div>
@@ -1482,6 +1502,7 @@ export default defineComponent({
             'bg-primary hover:bg-primary-2 text-white': veterinarian,
             'text-gray-400 hover:border-gray-300 border border-white': !veterinarian
           }"
+          :style="veterinarian ? 'background-color: #006722 !important;' : ''"
         >
           Private Veterinarian Disease
         </div>
@@ -1493,6 +1514,7 @@ export default defineComponent({
             'bg-primary hover:bg-primary-2 text-white': laboratory,
             'text-gray-400 hover:border-gray-300 border border-white': !laboratory
           }"
+          :style="laboratory ? 'background-color: #006722 !important;' : ''"
         >
           Laboratory Disease
         </div>
@@ -1504,47 +1526,102 @@ export default defineComponent({
             'bg-primary hover:bg-primary-2 text-white': aquaculture,
             'text-gray-400 hover:border-gray-300 border border-white': !aquaculture
           }"
+          :style="aquaculture ? 'background-color: #006722 !important;' : ''"
         >
           Aquaculture Disease
         </div>
       </div>
     </div>
     <div class="px-5 py-5">
-      <div
-        class="p-3 text-sm sm:px-4 sm:py-3 bg-card-5 rounded inline-block cursor-pointer shadow-md"
-      >
-        <div class="text-primary" :class="{ 'pb-2': show_state }" @click="show_state = !show_state">
-          {{ selected_state }}
-          <div class="inline-block pl-1 sm:pl-2" v-if="role == 'Federal'">
-            <drop-arrow-icon></drop-arrow-icon>
+      <div class="relative w-80 state-filter-dropdown inline-block">
+        <div
+          class="relative bg-white rounded-lg border-2 border-gray-200 hover:border-green-300 focus-within:border-green-500 transition-colors duration-200 cursor-pointer shadow-sm"
+          @click="show_state = !show_state"
+        >
+          <div class="px-4 py-3 flex items-center justify-between">
+            <div class="flex items-center space-x-3">
+              <div class="w-2 h-2 rounded-full bg-green-500"></div>
+              <span class="text-gray-800 font-medium">{{ selected_state }}</span>
+            </div>
+            <div class="transform transition-transform duration-200" :class="{ 'rotate-180': show_state }">
+              <svg class="w-5 h-5 text-gray-400" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M19 9l-7 7-7-7"/>
+              </svg>
+            </div>
           </div>
         </div>
+        
+        <!-- Enhanced Dropdown -->
         <div
           v-if="show_state && role == 'Federal'"
-          class="pt-2 absolute bg-card-5 -ml-4 border border-card-9 rounded rounded-t-none h-96 overflow-y-scroll z-50"
+          class="absolute top-full left-0 mt-2 w-full bg-white border border-gray-200 rounded-lg shadow-xl z-50 overflow-hidden"
         >
-          <div
-            class="text-primary hover:bg-card-4 py-2 pl-4 pr-10"
-            @click="selectState('All States')"
-          >
-            All States
+          <!-- Search Input -->
+          <div class="p-3 border-b border-gray-100">
+            <div class="relative">
+              <svg class="absolute left-3 top-1/2 transform -translate-y-1/2 w-4 h-4 text-gray-400" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M21 21l-6-6m2-5a7 7 0 11-14 0 7 7 0 0114 0z"/>
+              </svg>
+              <input
+                v-model="search_state"
+                type="text"
+                placeholder="Search states..."
+                class="w-full pl-10 pr-4 py-2 border border-gray-200 rounded-md focus:outline-none focus:ring-2 focus:ring-green-500 focus:border-transparent text-sm"
+                @click.stop
+              />
+            </div>
           </div>
-          <div
-            class="text-primary py-2 hover:bg-card-4 pl-4 pr-10"
-            v-for="(state, index) in states"
-            :key="index"
-            @click="selectState(index)"
-          >
-            {{ state.name }}
+          
+          <!-- Options List -->
+          <div class="max-h-48 overflow-y-auto">
+            <!-- All States Option -->
+            <div
+              class="px-4 py-3 hover:bg-green-50 cursor-pointer transition-colors duration-150 flex items-center space-x-3 border-b border-gray-50"
+              :class="{ 'bg-green-100 text-green-800': selected_state === 'All States' }"
+              @click="selectState('All States')"
+            >
+              <div class="w-2 h-2 rounded-full bg-gray-400"></div>
+              <span class="font-medium">All States</span>
+              <div class="ml-auto">
+                <svg v-if="selected_state === 'All States'" class="w-4 h-4 text-green-600" fill="currentColor" viewBox="0 0 20 20">
+                  <path fill-rule="evenodd" d="M16.707 5.293a1 1 0 010 1.414l-8 8a1 1 0 01-1.414 0l-4-4a1 1 0 011.414-1.414L8 12.586l7.293-7.293a1 1 0 011.414 0z" clip-rule="evenodd"/>
+                </svg>
+              </div>
+            </div>
+            
+            <!-- State Options -->
+            <div
+              v-for="(state, index) in filteredStates"
+              :key="index"
+              class="px-4 py-3 hover:bg-green-50 cursor-pointer transition-colors duration-150 flex items-center space-x-3"
+              :class="{ 'bg-green-100 text-green-800': selected_state === state.name }"
+              @click="selectState(index)"
+            >
+              <div class="w-2 h-2 rounded-full bg-green-500"></div>
+              <span>{{ state.name }}</span>
+              <div class="ml-auto">
+                <svg v-if="selected_state === state.name" class="w-4 h-4 text-green-600" fill="currentColor" viewBox="0 0 20 20">
+                  <path fill-rule="evenodd" d="M16.707 5.293a1 1 0 010 1.414l-8 8a1 1 0 01-1.414 0l-4-4a1 1 0 011.414-1.414L8 12.586l7.293-7.293a1 1 0 011.414 0z" clip-rule="evenodd"/>
+                </svg>
+              </div>
+            </div>
+            
+            <!-- No results message -->
+            <div v-if="filteredStates.length === 0" class="px-4 py-6 text-center text-gray-500">
+              <svg class="w-8 h-8 mx-auto mb-2 text-gray-300" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9.172 16.172a4 4 0 015.656 0M9 12h6m-6-4h6m2 5.291A7.962 7.962 0 0112 15c-2.206 0-4.206.896-5.657 2.343M16 21h-8a2 2 0 01-2-2V5a2 2 0 012-2h8a2 2 0 012 2v14a2 2 0 01-2 2z"/>
+              </svg>
+              <p class="text-sm">No states found</p>
+            </div>
           </div>
         </div>
       </div>
       <div class="float-right sm:space-x-4 space-x-2">
         <div
-          class="p-3 text-sm sm:px-4 sm:py-3 bg-card-5 rounded inline-block cursor-pointer shadow-md"
+          class="p-3 text-sm sm:px-4 sm:py-3 bg-white border-2 border-gray-200 hover:border-green-300 rounded inline-block cursor-pointer shadow-sm transition-colors duration-200"
         >
           <div
-            class="text-primary"
+            class="text-gray-800 font-medium"
             :class="{ 'pb-2': show_category }"
             @click="show_category = !show_category"
           >
@@ -1556,21 +1633,28 @@ export default defineComponent({
           <div class="relative">
             <div
               v-if="show_category"
-              class="pt-2 absolute w-36 bg-card-5 pl-4 pr-10 -ml-4 border border-card-9 rounded rounded-t-none"
+              class="pt-2 absolute w-36 bg-white border border-gray-200 -ml-4 rounded rounded-t-none shadow-xl"
             >
-              <div class="text-primary pb-2" @click="selectCategory('Approved')">Approved</div>
-              <div class="text-primary pb-2" @click="selectCategory('Pending')">Pending</div>
-              <div class="text-primary pb-2" @click="selectCategory('In Progress')">
-                In Progress
+              <div class="text-gray-800 hover:bg-green-50 px-4 py-3 transition-colors duration-150 cursor-pointer flex items-center space-x-3" @click="selectCategory('Approved')">
+                <div class="w-2 h-2 rounded-full bg-green-500"></div>
+                <span>Approved</span>
+              </div>
+              <div class="text-gray-800 hover:bg-green-50 px-4 py-3 transition-colors duration-150 cursor-pointer flex items-center space-x-3" @click="selectCategory('Pending')">
+                <div class="w-2 h-2 rounded-full bg-yellow-500"></div>
+                <span>Pending</span>
+              </div>
+              <div class="text-gray-800 hover:bg-green-50 px-4 py-3 transition-colors duration-150 cursor-pointer flex items-center space-x-3" @click="selectCategory('In Progress')">
+                <div class="w-2 h-2 rounded-full bg-blue-500"></div>
+                <span>In Progress</span>
               </div>
             </div>
           </div>
         </div>
         <div
-          class="p-3 text-sm sm:px-4 sm:py-3 bg-card-5 rounded inline-block cursor-pointer shadow-md"
+          class="p-3 text-sm sm:px-4 sm:py-3 bg-white border-2 border-gray-200 hover:border-green-300 rounded inline-block cursor-pointer shadow-sm transition-colors duration-200"
           @click="exportToExcel"
         >
-          <a href="javascript:;" class="">Export</a>
+          <a href="javascript:;" class="text-gray-800 font-medium">Export</a>
           <div class="inline-block sm:pl-2 pl-1">
             <export-icon></export-icon>
           </div>
@@ -1635,8 +1719,8 @@ export default defineComponent({
                      :class="{'border-primary bg-primary bg-opacity-5': selectedExportFormat === 'csv'}">
                 <input type="radio" v-model="selectedExportFormat" value="csv" class="hidden">
                 <div class="flex items-center">
-                  <div class="w-8 h-8 bg-blue-100 rounded flex items-center justify-center mr-3">
-                    <svg class="w-5 h-5 text-blue-600" fill="currentColor" viewBox="0 0 24 24">
+                  <div class="w-8 h-8 bg-green-100 rounded flex items-center justify-center mr-3">
+                    <svg class="w-5 h-5 text-green-600" fill="currentColor" viewBox="0 0 24 24">
                       <path d="M14,2H6A2,2 0 0,0 4,4V20A2,2 0 0,0 6,22H18A2,2 0 0,0 20,20V8L14,2M18,20H6V4H13V9H18V20Z"/>
                     </svg>
                   </div>
@@ -1675,8 +1759,8 @@ export default defineComponent({
               @rangeChanged="handleDateRangeChange"
             />
             
-            <div v-if="selectedStartDate || selectedEndDate" class="mt-4 p-3 bg-blue-50 rounded-md">
-              <p class="text-sm text-blue-700">
+            <div v-if="selectedStartDate || selectedEndDate" class="mt-4 p-3 bg-green-50 rounded-md">
+              <p class="text-sm text-green-700">
                 <strong>Selected Range:</strong>
                 <span v-if="selectedStartDate && selectedEndDate">
                   {{ new Date(selectedStartDate).toLocaleDateString() }} - {{ new Date(selectedEndDate).toLocaleDateString() }}

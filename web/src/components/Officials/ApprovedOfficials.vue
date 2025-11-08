@@ -351,7 +351,7 @@ export default defineComponent({
                     class="inline-flex px-2 py-1 text-xs font-semibold rounded-full"
                     :class="{
                       'bg-green-100 text-green-800': official.role === 'Federal',
-                      'bg-blue-100 text-blue-800': official.role === 'State',
+                      'bg-green-100 text-green-800': official.role === 'State',
                       'bg-purple-100 text-purple-800': official.role === 'AVO'
                     }"
                   >

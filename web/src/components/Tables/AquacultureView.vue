@@ -10,7 +10,8 @@ import {
   createFindStateFunction,
   createFixLocationFunction,
   createGetDateFunction,
-  createSortedComputed
+  createSortedComputed,
+  createPaginationHandlers
 } from './GenericDataTableView.vue'
 
 // Define TypeScript interface for Aquaculture report
@@ -92,59 +93,68 @@ export default defineComponent({
 
     // Vuetify data table state
     const itemsPerPage = ref(20)
+    const currentPage = ref(1)
     const selectedReports = ref<AquacultureReport[]>([])
     const sortBy = ref<any[]>([{ key: 'created_at', order: 'desc' }])
 
+    const valuesRef = computed(() => ({
+      selected_category: selected_category.value,
+      selected_state: selected_state.value
+    }))
+
     const sortedAquaculture = computed(createSortedComputed(aquaculture, sortBy))
 
+    // Dynamic table configuration based on data availability
+    const tableConfig = computed(() => {
+      const dataCount = sortedAquaculture.value.length
+      // Use fixed height only when there are enough rows to benefit from scrolling
+      const needsScrolling = dataCount > 10
+      return {
+        height: needsScrolling ? '600px' : 'auto',
+        fixedHeader: needsScrolling
+      }
+    })
+
+    // Pagination handlers
+    const { handlePageChange, handlePageSizeChange } = createPaginationHandlers(
+      currentPage,
+      itemsPerPage
+    )
+
     // Define table headers with exact column names from original
-    const headers = ref([
-      { title: 'S/N', key: 'index', sortable: false, width: 60 },
-      { title: 'Created Date', key: 'created_at', sortable: true, width: 140 },
-      { title: 'Report State - LGA', key: 'state_lga', sortable: false, width: 180 },
-      { title: 'Name of Farm', key: 'identifiers.name_of_farm', sortable: false, width: 150 },
-      { title: 'Region - Town/Village', key: 'identifiers.town', sortable: false, width: 180 },
-      { title: 'Farm Capacity', key: 'identifiers.capacity', sortable: false, width: 140 },
-      { title: 'Species', key: 'identifiers.selected_species', sortable: false, width: 140 },
-      { title: 'Location - Latitude', key: 'identifiers.my_coordinate.lat', sortable: false, width: 160 },
-      { title: 'Location - Longitute', key: 'identifiers.my_coordinate.lng', sortable: false, width: 160 },
-      { title: 'Owner\'s Phone Number', key: 'identifiers.owner_phone_number', sortable: false, width: 180 },
-      { title: 'Registration - Registered with Government?', key: 'identifiers.registration_type', sortable: false, width: 280 },
-      { title: 'Registration - Registration Type', key: 'identifiers.registration_type_display', sortable: false, width: 240 },
-      { title: 'Belong to Farmers Association?', key: 'identifiers.fish_farm_association', sortable: false, width: 240 },
-      { title: 'Type of Pond', key: 'identifiers.pond_type', sortable: false, width: 140 },
-      { title: 'Passive Surveillance - Any health plan', key: 'passive_surveillance.health_plan', sortable: false, width: 260 },
-      { title: 'Passive Surveillance - Vets attends to the health of aquatic species', key: 'passive_surveillance.vet_attend_to', sortable: false, width: 420 },
-      { title: 'Passive Surveillance - Health practitioner visits (bi-weekly)', key: 'passive_surveillance.practitioner_visit', sortable: false, width: 380 },
-      { title: 'Passive Surveillance - Fishes on the farm?', key: 'passive_surveillance.fishes_on_farm', sortable: false, width: 280 },
-      { title: 'Passive Surveillance - Mortality for the month', key: 'passive_surveillance.mortality_for_month', sortable: false, width: 300 },
-      { title: 'Passive Surveillance - Average mortality per day', key: 'passive_surveillance.average_mortality_per_day', sortable: false, width: 320 },
-      { title: 'Water Quality - Recent Test', key: 'water_quality.recent_quality_test', sortable: false, width: 200 },
-      { title: 'Water Quality - Contains organic materials and food debris?', key: 'water_quality.organic_material', sortable: false, width: 380 },
-      { title: 'Water Quality - Has Phytoplankton and algae available', key: 'water_quality.algae_available', sortable: false, width: 360 },
-      { title: 'Water Quality - Type of test normally done', key: 'water_quality.test_type', sortable: false, width: 300 },
-      { title: 'Water Quality - Change pond water', key: 'water_quality.change_pond_water', sortable: false, width: 260 },
-      { title: 'Biosecurity Measures - Measures Seen', key: 'biosecurity_measures.selected_bio_measures', sortable: false, width: 280 },
-      { title: 'Biosecurity Measures - Other aquatic within 1km', key: 'biosecurity_measures.aquatic_available', sortable: false, width: 320 },
-      { title: 'Diseases Suspected - Viral', key: 'disease_suspected.viral', sortable: false, width: 200 },
-      { title: 'Diseases Suspected - Bacterial', key: 'disease_suspected.bacterial', sortable: false, width: 220 },
-      { title: 'Diseases Suspected - Fungal', key: 'disease_suspected.fungal', sortable: false, width: 200 },
-      { title: 'Diseases Suspected - Protozoan parasitic', key: 'disease_suspected.protozoan_parasitic', sortable: false, width: 280 },
-      { title: 'Diseases Suspected - Helminth parasitic', key: 'disease_suspected.helminth_parasitic', sortable: false, width: 280 },
-      { title: 'Diseases Suspected - Leech parasitic', key: 'disease_suspected.leech_infestation', sortable: false, width: 260 },
-      { title: 'Diseases Suspected - Environmental diseases', key: 'disease_suspected.environmental_diseases', sortable: false, width: 320 },
-      { title: 'Diseases Suspected - Nutritional diseases', key: 'disease_suspected.nutritional_diseases', sortable: false, width: 320 },
-      { title: 'OIE listed fish pathogens (2020)', key: 'oie_listed_fish_pathogens', sortable: false, width: 260 },
-      { title: 'Action', key: 'actions', sortable: false, width: 180 }
-    ])
+    // Column visibility control (condensed for the very wide table)
+    const columnVisibilityLevel = ref(2) // Start with essential view due to many columns
+    const allColumns = [
+      { title: 'S/N', key: 'index', sortable: false, width: 60, priority: 1 },
+      { title: 'Created Date', key: 'created_at', sortable: true, width: 120, priority: 1 },
+      { title: 'State - LGA', key: 'state_lga', sortable: false, width: 140, priority: 1 },
+      { title: 'Farm Name', key: 'identifiers.name_of_farm', sortable: false, width: 130, priority: 2 },
+      { title: 'Town/Village', key: 'identifiers.town', sortable: false, width: 130, priority: 2 },
+      { title: 'Farm Capacity', key: 'identifiers.capacity', sortable: false, width: 110, priority: 3 },
+      { title: 'Species', key: 'identifiers.selected_species', sortable: false, width: 120, priority: 2 },
+      { title: 'Latitude', key: 'identifiers.my_coordinate.lat', sortable: false, width: 100, priority: 5 },
+      { title: 'Longitude', key: 'identifiers.my_coordinate.lng', sortable: false, width: 100, priority: 5 },
+      { title: 'Owner Phone', key: 'identifiers.owner_phone_number', sortable: false, width: 120, priority: 4 },
+      { title: 'Registered', key: 'identifiers.registration_type', sortable: false, width: 110, priority: 3 },
+      { title: 'Pond Type', key: 'identifiers.pond_type', sortable: false, width: 110, priority: 3 },
+      { title: 'Health Plan', key: 'passive_surveillance.health_plan', sortable: false, width: 110, priority: 4 },
+      { title: 'Mortality/Month', key: 'passive_surveillance.mortality_for_month', sortable: false, width: 130, priority: 3 },
+      { title: 'Water Quality Test', key: 'water_quality.recent_quality_test', sortable: false, width: 130, priority: 4 },
+      { title: 'Action', key: 'actions', sortable: false, width: 120, priority: 1 }
+    ]
+    
+    const headers = computed(() => allColumns.filter(col => col.priority <= columnVisibilityLevel.value))
 
     watch(selected_category, () => {
+      currentPage.value = 1
       getAqauculture()
     })
     watch(selected_state, () => {
+      currentPage.value = 1
       getAqauculture()
     })
     watch(successful, () => {
+      currentPage.value = 1
       getAqauculture()
     })
     watch(export_to_excel, () => {
@@ -170,31 +180,7 @@ export default defineComponent({
         state: selected_state.value,
         in_progress: progress
       }
-      useAquaculture().getAquaculture(values)
-    }
-    const loadNextPage = () => {
-      let sort = false
-      let progress = false
-      if (selected_category.value == 'Approved') {
-        sort = true
-        progress = false
-      } else if (selected_category.value == 'Pending') {
-        sort = false
-        progress = false
-      } else if (selected_category.value == 'In Progress') {
-        sort = false
-        progress = true
-      }
-
-      const values = {
-        category: sort,
-        state: selected_state.value,
-        in_progress: progress
-      }
-
-      if (pagination.value.hasMore && !loading.value) {
-        useAquaculture().loadNextPage(values)
-      }
+      useAquaculture().getAquaculturePage(values, currentPage.value, itemsPerPage.value)
     }
 
     const getDate = createGetDateFunction(months)
@@ -383,17 +369,22 @@ export default defineComponent({
     return {
       aquaculture,
       sortedAquaculture,
+      tableConfig,
       decline_form,
       doc_id,
       headers,
+      allColumns,
+      columnVisibilityLevel,
       itemsPerPage,
+      currentPage,
       selectedReports,
       sortBy,
       loading,
       pagination,
-      loadNextPage,
       performAction,
       handleBulkAction,
+      handlePageChange,
+      handlePageSizeChange,
       getAqauculture,
       closeModal,
       getDate,
@@ -412,20 +403,66 @@ export default defineComponent({
       @clear-selection="selectedReports = []"
     />
 
+    <!-- Column Visibility Controls -->
+    <v-card class="mb-4 pa-3" elevation="1">
+      <div class="d-flex align-center gap-3">
+        <span class="text-subtitle-2 text-medium-emphasis">Column View:</span>
+        <v-btn-toggle
+          v-model="columnVisibilityLevel"
+          variant="outlined"
+          size="small"
+          mandatory
+        >
+          <v-btn :value="2" size="small">
+            Essential
+            <v-tooltip activator="parent" location="top">
+              Show only the most important columns ({{ allColumns.filter(c => c.priority <= 2).length }} columns)
+            </v-tooltip>
+          </v-btn>
+          <v-btn :value="3" size="small">
+            Standard
+            <v-tooltip activator="parent" location="top">
+              Show standard view ({{ allColumns.filter(c => c.priority <= 3).length }} columns)
+            </v-tooltip>
+          </v-btn>
+          <v-btn :value="4" size="small">
+            Detailed
+            <v-tooltip activator="parent" location="top">
+              Show detailed view ({{ allColumns.filter(c => c.priority <= 4).length }} columns)
+            </v-tooltip>
+          </v-btn>
+          <v-btn :value="5" size="small">
+            Complete
+            <v-tooltip activator="parent" location="top">
+              Show all columns ({{ allColumns.length }} columns)
+            </v-tooltip>
+          </v-btn>
+        </v-btn-toggle>
+        <v-spacer></v-spacer>
+        <span class="text-caption text-medium-emphasis">
+          Showing {{ headers.length }} of {{ allColumns.length }} columns
+        </span>
+      </div>
+    </v-card>
+
     <!-- Vuetify Data Table -->
     <v-data-table
       v-model="selectedReports"
       v-model:items-per-page="itemsPerPage"
+      v-model:page="currentPage"
       v-model:sort-by="sortBy"
       :headers="headers"
       :items="sortedAquaculture"
+      :items-length="pagination.totalCount"
       :loading="loading"
       show-select
       return-object
       item-value="doc_id"
       class="elevation-1"
-      fixed-header
-      height="600px"
+      :fixed-header="tableConfig.fixedHeader"
+      :height="tableConfig.height"
+      @update:page="handlePageChange"
+      @update:items-per-page="handlePageSizeChange"
     >
       <!-- S/N Column -->
       <template v-slot:item.index="{ index }">
@@ -655,24 +692,6 @@ export default defineComponent({
           <div class="text-gray-500 text-lg">No reports found</div>
           <div class="text-gray-400 text-sm mt-2">
             Try adjusting your filters or check back later
-          </div>
-        </div>
-      </template>
-
-      <!-- Bottom Slot with Load More Button -->
-      <template v-slot:bottom>
-        <div class="text-center pa-4">
-          <v-btn
-            v-if="pagination.hasMore"
-            @click="loadNextPage"
-            :loading="loading"
-            color="primary"
-            variant="outlined"
-          >
-            Load More
-          </v-btn>
-          <div v-else class="text-sm text-gray-500">
-            All reports loaded ({{ aquaculture.length }} total)
           </div>
         </div>
       </template>

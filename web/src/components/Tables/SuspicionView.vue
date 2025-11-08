@@ -10,7 +10,8 @@ import {
   createFindStateFunction,
   createFixLocationFunction,
   createGetDateFunction,
-  createSortedComputed
+  createSortedComputed,
+  createPaginationHandlers
 } from './GenericDataTableView.vue'
 
 interface SuspicionReport {
@@ -47,54 +48,86 @@ export default defineComponent({
     const itemsPerPage = ref(20)
     const sortBy = ref<any[]>([{ key: 'created_at', order: 'desc' }])
     const selectedReports = ref<SuspicionReport[]>([])
+    const currentPage = ref(1)
 
-    const headers = ref([
-      { title: 'S/N', key: 'index', sortable: false, width: 60 },
-      { title: 'Created Date', key: 'created_at', sortable: true, width: 140 },
-      { title: 'Report State / LGA', key: 'state_lga', sortable: false, width: 180 },
-      { title: 'Disease Suspected', key: 'disease_name', sortable: true, width: 160 },
-      { title: 'Other Diseases', key: 'other_diseases', sortable: false, width: 160 },
-      { title: 'Laboratory Slip', key: 'laboratory_slip', sortable: false, width: 160 },
-      { title: 'Survey Agent Name', key: 'survey_agent.name', sortable: false, width: 160 },
-      { title: 'Survey Agent Phone', key: 'survey_agent.phone_number', sortable: false, width: 160 },
-      { title: 'Location Name', key: 'details.location_details', sortable: false, width: 160 },
-      { title: 'Address', key: 'details.address_details', sortable: false, width: 200 },
-      { title: 'Latitude', key: 'location.lat', sortable: false, width: 120 },
-      { title: 'Longitude', key: 'location.lng', sortable: false, width: 120 },
-      { title: 'Owner Name', key: 'owner_details.name_of_owner', sortable: false, width: 160 },
-      { title: 'Owner Phone', key: 'owner_details.phone_number', sortable: false, width: 160 },
-      { title: 'Date of Purchase', key: 'purchase_details.date_of_purchase', sortable: false, width: 160 },
-      { title: 'Source of Animals', key: 'purchase_details.source_of_animals', sortable: false, width: 180 },
-      { title: 'Farm Practice', key: 'farm_practices.select_farming', sortable: false, width: 160 },
-      { title: 'Movement From State', key: 'farm_practices.transhumance.animal_movement_from.state', sortable: false, width: 180 },
-      { title: 'Movement From LGA', key: 'farm_practices.transhumance.animal_movement_from.local_govt', sortable: false, width: 180 },
-      { title: 'Movement From Location', key: 'farm_practices.transhumance.animal_movement_from.name_of_location', sortable: false, width: 200 },
-      { title: 'Movement To State', key: 'farm_practices.transhumance.animal_movement_to.state', sortable: false, width: 180 },
-      { title: 'Movement To LGA', key: 'farm_practices.transhumance.animal_movement_to.local_govt', sortable: false, width: 180 },
-      { title: 'Movement To Location', key: 'farm_practices.transhumance.animal_movement_to.name_of_location', sortable: false, width: 200 },
-      { title: 'Total Animals', key: 'number_of_animals.total_animals', sortable: false, width: 150 },
-      { title: 'Animals Affected', key: 'number_of_animals.cases', sortable: false, width: 150 },
-      { title: 'Animals Dead', key: 'number_of_animals.deaths', sortable: false, width: 150 },
-      { title: 'Animals Destroyed', key: 'number_of_animals.destroyed', sortable: false, width: 150 },
-      { title: 'Animals Recovered', key: 'number_of_animals.recovered', sortable: false, width: 150 },
-      { title: 'Animals Slaughtered', key: 'number_of_animals.slaughter', sortable: false, width: 160 },
-      { title: 'Species', key: 'animal_details.species', sortable: false, width: 140 },
-      { title: 'Sex', key: 'animal_details.sex', sortable: false, width: 120 },
-      { title: 'Age Affected', key: 'age', sortable: false, width: 140 },
-      { title: 'Clinical Signs', key: 'clinical_signs', sortable: false, width: 180 },
-      { title: 'Sample ID', key: 'samples.sample_id', sortable: false, width: 140 },
-      { title: 'Sample Taken', key: 'samples.sample_taken', sortable: false, width: 140 },
-      { title: 'Control Measures', key: 'control_measures', sortable: false, width: 200 },
-      { title: 'Report Received', key: 'report_date', sortable: false, width: 160 },
-      { title: 'Action', key: 'actions', sortable: false, width: 160 }
-    ])
+    // Create reactive values for pagination
+    const valuesRef = computed(() => {
+      let sort = false
+      let progress = false
+      if (selected_category.value == 'Approved') {
+        sort = true
+        progress = false
+      } else if (selected_category.value == 'Pending') {
+        sort = false
+        progress = false
+      } else if (selected_category.value == 'In Progress') {
+        sort = false
+        progress = true
+      }
+
+      return {
+        category: sort,
+        state: selected_state.value,
+        in_progress: progress
+      }
+    })
+
+    // Create pagination handlers
+    const { handlePageChange, handlePageSizeChange } = createPaginationHandlers(
+      suspicionStore,
+      valuesRef
+    )
+
+    // Column visibility control (simplified for space)
+    const columnVisibilityLevel = ref(3)
+    const allColumns = [
+      { title: 'S/N', key: 'index', sortable: false, width: 60, priority: 1 },
+      { title: 'Created Date', key: 'created_at', sortable: true, width: 140, priority: 1 },
+      { title: 'State / LGA', key: 'state_lga', sortable: false, width: 150, priority: 1 },
+      { title: 'Disease Suspected', key: 'disease_name', sortable: true, width: 140, priority: 2 },
+      { title: 'Other Diseases', key: 'other_diseases', sortable: false, width: 130, priority: 4 },
+      { title: 'Laboratory Slip', key: 'laboratory_slip', sortable: false, width: 130, priority: 3 },
+      { title: 'Agent Name', key: 'survey_agent.name', sortable: false, width: 130, priority: 2 },
+      { title: 'Agent Phone', key: 'survey_agent.phone_number', sortable: false, width: 130, priority: 5 },
+      { title: 'Location', key: 'details.location_details', sortable: false, width: 130, priority: 2 },
+      { title: 'Address', key: 'details.address_details', sortable: false, width: 150, priority: 4 },
+      { title: 'Latitude', key: 'location.lat', sortable: false, width: 100, priority: 5 },
+      { title: 'Longitude', key: 'location.lng', sortable: false, width: 100, priority: 5 },
+      { title: 'Owner Name', key: 'owner_details.name_of_owner', sortable: false, width: 130, priority: 3 },
+      { title: 'Owner Phone', key: 'owner_details.phone_number', sortable: false, width: 130, priority: 5 },
+      { title: 'Purchase Date', key: 'purchase_details.date_of_purchase', sortable: false, width: 130, priority: 4 },
+      { title: 'Animal Source', key: 'purchase_details.source_of_animals', sortable: false, width: 140, priority: 4 },
+      { title: 'Farm Practice', key: 'farm_practices.select_farming', sortable: false, width: 130, priority: 4 },
+      // Condensed movement columns
+      { title: 'Total Animals', key: 'number_of_animals.total_animals', sortable: false, width: 120, priority: 2 },
+      { title: 'Animals Affected', key: 'number_of_animals.cases', sortable: false, width: 130, priority: 2 },
+      { title: 'Animals Dead', key: 'number_of_animals.deaths', sortable: false, width: 120, priority: 3 },
+      { title: 'Species', key: 'animal_details.species', sortable: false, width: 110, priority: 2 },
+      { title: 'Clinical Signs', key: 'clinical_signs', sortable: false, width: 140, priority: 3 },
+      { title: 'Action', key: 'actions', sortable: false, width: 120, priority: 1 }
+    ]
+    
+    const headers = computed(() => allColumns.filter(col => col.priority <= columnVisibilityLevel.value))
 
     const sortedSuspicion = computed(createSortedComputed(suspicion, sortBy))
 
+    // Dynamic table configuration based on data availability
+    const tableConfig = computed(() => {
+      const dataCount = sortedSuspicion.value.length
+      // Use fixed height only when there are enough rows to benefit from scrolling
+      const needsScrolling = dataCount > 10
+      return {
+        height: needsScrolling ? '600px' : 'auto',
+        fixedHeader: needsScrolling
+      }
+    })
+
     watch(selected_category, () => {
+      currentPage.value = 1
       getSuspicion()
     })
     watch(selected_state, () => {
+      currentPage.value = 1
       getSuspicion()
     })
     watch(successful, () => {
@@ -111,43 +144,8 @@ export default defineComponent({
     )
 
     const getSuspicion = () => {
-      let sort = false
-      let progress = false
-
-      if (selected_category.value === 'Approved') {
-        sort = true
-      } else if (selected_category.value === 'In Progress') {
-        progress = true
-      }
-
-      const values = {
-        category: sort,
-        state: selected_state.value || 'All States',
-        in_progress: progress
-      }
-
-      suspicionStore.getSuspicion(values)
-    }
-
-    const loadNextPage = () => {
-      let sort = false
-      let progress = false
-
-      if (selected_category.value === 'Approved') {
-        sort = true
-      } else if (selected_category.value === 'In Progress') {
-        progress = true
-      }
-
-      const values = {
-        category: sort,
-        state: selected_state.value || 'All States',
-        in_progress: progress
-      }
-
-      if (pagination.value.hasMore && !loading.value) {
-        suspicionStore.loadNextPage(values)
-      }
+      // Use the new page-based method for traditional pagination
+      suspicionStore.getSuspicionPage(valuesRef.value, currentPage.value, itemsPerPage.value)
     }
 
     const getDate = createGetDateFunction(months)
@@ -341,12 +339,16 @@ export default defineComponent({
     return {
       suspicion,
       sortedSuspicion,
+      tableConfig,
       decline_form,
       doc_id,
       headers,
+      allColumns,
+      columnVisibilityLevel,
       itemsPerPage,
       selectedReports,
       sortBy,
+      currentPage,
       getDate,
       findState,
       fixLocation,
@@ -354,9 +356,10 @@ export default defineComponent({
       closeModal,
       loading,
       pagination,
-      loadNextPage,
       performAction,
-      handleBulkAction
+      handleBulkAction,
+      handlePageChange,
+      handlePageSizeChange
     }
   }
 })
@@ -370,19 +373,40 @@ export default defineComponent({
       @clear-selection="selectedReports = []"
     />
 
+    <!-- Column Visibility Controls -->
+    <v-card class="mb-4 pa-3" elevation="1">
+      <div class="d-flex align-center gap-3">
+        <span class="text-subtitle-2 text-medium-emphasis">Column View:</span>
+        <v-btn-toggle v-model="columnVisibilityLevel" variant="outlined" size="small" mandatory>
+          <v-btn :value="2" size="small">Essential</v-btn>
+          <v-btn :value="3" size="small">Standard</v-btn>
+          <v-btn :value="4" size="small">Detailed</v-btn>
+          <v-btn :value="5" size="small">Complete</v-btn>
+        </v-btn-toggle>
+        <v-spacer></v-spacer>
+        <span class="text-caption text-medium-emphasis">
+          Showing {{ headers.length }} of {{ allColumns.length }} columns
+        </span>
+      </div>
+    </v-card>
+
     <v-data-table
       v-model="selectedReports"
       v-model:items-per-page="itemsPerPage"
       v-model:sort-by="sortBy"
+      v-model:page="currentPage"
       :headers="headers"
       :items="sortedSuspicion"
       :loading="loading"
+      :items-length="pagination.totalCount"
       show-select
       return-object
       item-value="doc_id"
       class="elevation-1"
-      fixed-header
-      height="600px"
+      :fixed-header="tableConfig.fixedHeader"
+      :height="tableConfig.height"
+      @update:page="handlePageChange"
+      @update:items-per-page="handlePageSizeChange"
     >
       <template v-slot:item.index="{ index }">
         {{ index + 1 }}
@@ -552,28 +576,12 @@ export default defineComponent({
         <v-skeleton-loader type="table-row@10"></v-skeleton-loader>
       </template>
 
+            <!-- No Data Slot -->
       <template v-slot:no-data>
         <div class="text-center py-8">
           <div class="text-gray-500 text-lg">No reports found</div>
           <div class="text-gray-400 text-sm mt-2">
             Try adjusting your filters or check back later
-          </div>
-        </div>
-      </template>
-
-      <template v-slot:bottom>
-        <div class="text-center pa-4">
-          <v-btn
-            v-if="pagination.hasMore"
-            @click="loadNextPage"
-            :loading="loading"
-            color="primary"
-            variant="outlined"
-          >
-            Load More
-          </v-btn>
-          <div v-else class="text-sm text-gray-500">
-            All reports loaded ({{ suspicion.length }} total)
           </div>
         </div>
       </template>

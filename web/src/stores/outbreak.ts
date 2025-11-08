@@ -25,7 +25,9 @@ export const useOutbreak = defineStore('outbreak', {
       pageSize: 20,
       hasMore: true,
       lastVisible: null,
-      totalCount: 0
+      totalCount: 0,
+      pageCursors: {} as any, // Store cursors for each page for efficient navigation
+      totalPages: 0
     },
     cache: {} as any,
     cacheExpiry: 5 * 60 * 1000 // 5 minutes
@@ -66,14 +68,16 @@ export const useOutbreak = defineStore('outbreak', {
       this.cache = {}
     },
 
-    // Reset pagination
+    // Reset pagination state
     resetPagination() {
       this.pagination = {
         currentPage: 1,
         pageSize: 20,
         hasMore: true,
         lastVisible: null,
-        totalCount: 0
+        totalCount: 0,
+        pageCursors: {},
+        totalPages: 0
       }
     },
     async getOutbreak(values: any, isNextPage = false, pageSize = 20) {
@@ -244,6 +248,170 @@ export const useOutbreak = defineStore('outbreak', {
     async loadNextPage(values: any) {
       if (this.pagination.hasMore && !this.loading) {
         await this.getOutbreak(values, true, this.pagination.pageSize)
+      }
+    },
+
+    // Method for traditional page-based navigation
+    async getOutbreakPage(values: any, page: number, pageSize: number = 20) {
+      try {
+        this.loading = true
+        const state = values.state
+
+        // Update current page
+        this.pagination.currentPage = page
+        this.pagination.pageSize = pageSize
+
+        if (values.in_progress == true) {
+          // Handle in-progress reports (no pagination needed, typically fewer items)
+          return await this.getOutbreak(values, false, pageSize)
+        }
+
+        let sort = false
+        if (values.category == 1 || values.category === true) {
+          sort = true
+        } else {
+          sort = false
+        }
+
+        // For page 1, start fresh
+        if (page === 1) {
+          this.pagination.pageCursors = {}
+          this.pagination.lastVisible = null
+          return await this.getOutbreak(values, false, pageSize)
+        }
+
+        // For subsequent pages, use cached cursors if available
+        const cursors = this.pagination.pageCursors
+        let queryRef: any
+
+        // Build base query
+        if (state != 'All States') {
+          queryRef = query(
+            collection(fb.db, 'outbreak_reports'),
+            where('approved', '==', sort),
+            where('state', '==', state),
+            where('finished', '==', true),
+            limit(pageSize)
+          )
+        } else {
+          queryRef = query(
+            collection(fb.db, 'outbreak_reports'),
+            where('approved', '==', sort),
+            where('finished', '==', true),
+            limit(pageSize)
+          )
+        }
+
+        // If we have a cursor for the previous page, use it
+        const prevPageCursor = cursors[page - 1]
+        if (prevPageCursor) {
+          if (state != 'All States') {
+            queryRef = query(
+              collection(fb.db, 'outbreak_reports'),
+              where('approved', '==', sort),
+              where('state', '==', state),
+              where('finished', '==', true),
+              startAfter(prevPageCursor),
+              limit(pageSize)
+            )
+          } else {
+            queryRef = query(
+              collection(fb.db, 'outbreak_reports'),
+              where('approved', '==', sort),
+              where('finished', '==', true),
+              startAfter(prevPageCursor),
+              limit(pageSize)
+            )
+          }
+        } else {
+          // If no cursor available, we need to navigate sequentially
+          // This is a limitation of Firebase cursor-based pagination
+          // For better UX, we'll load from page 1 and navigate to the desired page
+          await this.loadPagesSequentially(values, page, pageSize)
+          return
+        }
+
+        const docs = await getDocs(queryRef)
+        let value = [] as any
+
+        // Reset the array for page-based navigation
+        this.outbreak = []
+        this.reporter_state = []
+
+        docs.forEach((doc) => {
+          const unit = doc.data()
+          unit.doc_id = doc.id
+          this.getReporterState({
+            uid: doc.data().uid,
+            doc_id: doc.id
+          })
+          value.push(unit)
+        })
+
+        // Sort by created_at descending (client-side)
+        value.sort((a: any, b: any) => b.created_at - a.created_at)
+
+        // Update pagination state
+        this.pagination.lastVisible = docs.docs[docs.docs.length - 1] || null
+        this.pagination.hasMore = docs.docs.length === pageSize
+        
+        // Store cursor for this page
+        if (docs.docs.length > 0) {
+          this.pagination.pageCursors[page] = docs.docs[docs.docs.length - 1]
+        }
+
+        // Estimate total count for traditional pagination
+        if (page === 1 && docs.docs.length === pageSize) {
+          this.pagination.totalCount = Math.max(pageSize * 3, value.length + pageSize * 2)
+        } else if (docs.docs.length < pageSize) {
+          this.pagination.totalCount = (page - 1) * pageSize + docs.docs.length
+          this.pagination.hasMore = false
+        } else {
+          this.pagination.totalCount = Math.max(this.pagination.totalCount, page * pageSize + pageSize)
+        }
+
+        this.outbreak = value
+
+      } catch (error) {
+        console.error('Error fetching outbreak page:', error)
+      } finally {
+        this.loading = false
+      }
+    },
+
+    // Helper method to load pages sequentially when cursor is not available
+    async loadPagesSequentially(values: any, targetPage: number, pageSize: number) {
+      try {
+        // Start from page 1 and load sequentially to build cursors
+        this.pagination.pageCursors = {}
+        this.pagination.currentPage = 1
+        
+        // Load first page
+        await this.getOutbreak(values, false, pageSize)
+        
+        // Store cursor for page 1
+        if (this.pagination.lastVisible) {
+          this.pagination.pageCursors[1] = this.pagination.lastVisible
+        }
+
+        // Load subsequent pages until we reach target page
+        for (let page = 2; page <= targetPage; page++) {
+          if (this.pagination.hasMore) {
+            await this.getOutbreak(values, true, pageSize)
+            if (this.pagination.lastVisible) {
+              this.pagination.pageCursors[page] = this.pagination.lastVisible
+            }
+          }
+        }
+
+        // Now load the target page data only
+        if (targetPage > 1 && this.pagination.pageCursors[targetPage - 1]) {
+          await this.getOutbreakPage(values, targetPage, pageSize)
+        }
+
+        this.pagination.currentPage = targetPage
+      } catch (error) {
+        console.error('Error loading pages sequentially:', error)
       }
     },
     async approve(doc_id: any) {

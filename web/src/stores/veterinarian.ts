@@ -24,7 +24,10 @@ export const useVeterinarian = defineStore('veterinarian', {
       currentPage: 1,
       pageSize: 20,
       hasMore: true,
-      lastVisible: null
+      lastVisible: null,
+      totalCount: 0,
+      pageCursors: {} as any, // Store cursors for each page for efficient navigation
+      totalPages: 0
     },
     cache: new Map()
   }),
@@ -222,6 +225,160 @@ export const useVeterinarian = defineStore('veterinarian', {
         console.error('Error fetching veterinarian reports:', error)
       } finally {
         this.loading = false
+      }
+    },
+
+    // New method for traditional pagination
+    async getVeterinarianPage(values: any, page = 1, pageSize = 20) {
+      try {
+        this.loading = true;
+        const state = values.state;
+        let sort = false;
+
+        // Check cache first
+        const cacheKey = `${JSON.stringify(values)}_page_${page}`;
+        if (this.pagination.pageCursors[cacheKey]) {
+          this.veterinarian = this.pagination.pageCursors[cacheKey].data;
+          this.pagination.currentPage = page;
+          this.loading = false;
+          return;
+        }
+
+        if (values.in_progress == true) {
+          if (state != 'All States') {
+            await this.show_in_progress_a_state(state);
+          } else {
+            await this.show_in_progress_all_states();
+          }
+          this.pagination.currentPage = page;
+          this.loading = false;
+          return;
+        }
+
+        if (values.category) {
+          sort = true;
+        } else {
+          sort = false;
+        }
+
+        // For page 1, no cursor needed
+        if (page === 1) {
+          await this.loadPagesSequentially(values, 1, pageSize, sort, state);
+        } else {
+          // Load pages sequentially up to the requested page
+          await this.loadPagesSequentially(values, page, pageSize, sort, state);
+        }
+
+        this.pagination.currentPage = page;
+      } catch (error) {
+        console.error('Error fetching veterinarian page:', error);
+      } finally {
+        this.loading = false;
+      }
+    },
+
+    async loadPagesSequentially(values: any, targetPage: number, pageSize: number, sort: boolean, state: string) {
+      let currentCursor = null;
+      
+      // Load pages sequentially to get to the target page
+      for (let page = 1; page <= targetPage; page++) {
+        const cacheKey = `${JSON.stringify(values)}_page_${page}`;
+        
+        // Check if this page is already cached
+        if (this.pagination.pageCursors[cacheKey]) {
+          currentCursor = this.pagination.pageCursors[cacheKey].cursor;
+          if (page === targetPage) {
+            this.veterinarian = this.pagination.pageCursors[cacheKey].data;
+          }
+          continue;
+        }
+
+        // Build query
+        let queryRef: any;
+        
+        if (state != 'All States') {
+          if (currentCursor) {
+            queryRef = query(
+              collection(fb.db, 'veterinarian_reports'),
+              where('approved', '==', sort),
+              where('state', '==', state),
+              where('finished', '==', true),
+              startAfter(currentCursor),
+              limit(pageSize)
+            );
+          } else {
+            queryRef = query(
+              collection(fb.db, 'veterinarian_reports'),
+              where('approved', '==', sort),
+              where('state', '==', state),
+              where('finished', '==', true),
+              limit(pageSize)
+            );
+          }
+        } else {
+          if (currentCursor) {
+            queryRef = query(
+              collection(fb.db, 'veterinarian_reports'),
+              where('approved', '==', sort),
+              where('finished', '==', true),
+              startAfter(currentCursor),
+              limit(pageSize)
+            );
+          } else {
+            queryRef = query(
+              collection(fb.db, 'veterinarian_reports'),
+              where('approved', '==', sort),
+              where('finished', '==', true),
+              limit(pageSize)
+            );
+          }
+        }
+
+        const docs = await getDocs(queryRef);
+        let value = [] as any;
+        this.reporter_state = [];
+
+        docs.forEach((doc) => {
+          const unit = doc.data();
+          unit.doc_id = doc.id;
+          this.getReporterState({
+            uid: doc.data().uid,
+            doc_id: doc.id
+          });
+          value.push(unit);
+        });
+
+        // Sort by created_at descending (client-side)
+        value.sort((a: any, b: any) => b.created_at - a.created_at);
+
+        // Cache this page
+        const lastDoc = docs.docs[docs.docs.length - 1] || null;
+        this.pagination.pageCursors[cacheKey] = {
+          data: value,
+          cursor: lastDoc
+        };
+
+        // Update cursor for next iteration
+        currentCursor = lastDoc;
+
+        // If this is the target page, set it as current data
+        if (page === targetPage) {
+          this.veterinarian = value;
+        }
+
+        // Update total count and pages (estimate based on page size)
+        if (page === 1) {
+          // Rough estimate - in production you might want to use a count query
+          this.pagination.totalCount = Math.max(value.length * 10, pageSize * 5);
+          this.pagination.totalPages = Math.ceil(this.pagination.totalCount / pageSize);
+        }
+
+        // If we got fewer docs than pageSize, we've reached the end
+        if (docs.docs.length < pageSize) {
+          this.pagination.totalPages = page;
+          this.pagination.totalCount = ((page - 1) * pageSize) + docs.docs.length;
+          break;
+        }
       }
     },
 

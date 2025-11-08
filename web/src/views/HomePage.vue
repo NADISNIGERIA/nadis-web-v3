@@ -382,10 +382,10 @@ export default defineComponent({
     
     <!-- Enhanced State Filter (Federal users only) -->
     <div v-if="role === 'Federal'" class="pt-8 px-6">
-      <div class="bg-gradient-to-r from-blue-50 to-indigo-50 rounded-xl shadow-md p-6 mb-6 border border-blue-100">
+      <div class="bg-gradient-to-r from-green-50 to-green-100 rounded-xl shadow-md p-6 mb-6 border border-green-100">
         <div class="flex flex-col sm:flex-row sm:items-center space-y-3 sm:space-y-0 sm:space-x-6">
           <div class="flex items-center space-x-3">
-            <div class="w-8 h-8 bg-blue-500 rounded-lg flex items-center justify-center">
+            <div class="w-8 h-8 bg-green-500 rounded-lg flex items-center justify-center">
               <svg class="w-5 h-5 text-white" fill="none" stroke="currentColor" viewBox="0 0 24 24">
                 <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M17.657 16.657L13.414 20.9a1.998 1.998 0 01-2.827 0l-4.244-4.243a8 8 0 1111.314 0z"/>
                 <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M15 11a3 3 0 11-6 0 3 3 0 016 0z"/>
@@ -396,12 +396,12 @@ export default defineComponent({
           
           <div class="relative flex-1 max-w-xs state-filter-dropdown">
             <div
-              class="relative bg-white rounded-lg border-2 border-gray-200 hover:border-blue-300 focus-within:border-blue-500 transition-colors duration-200 cursor-pointer shadow-sm"
+              class="relative bg-white rounded-lg border-2 border-gray-200 hover:border-green-300 focus-within:border-green-500 transition-colors duration-200 cursor-pointer shadow-sm"
               @click="show_state = !show_state"
             >
               <div class="px-4 py-3 flex items-center justify-between">
                 <div class="flex items-center space-x-3">
-                  <div class="w-2 h-2 rounded-full bg-blue-500"></div>
+                  <div class="w-2 h-2 rounded-full bg-green-500"></div>
                   <span class="text-gray-800 font-medium">{{ selected_state }}</span>
                 </div>
                 <div class="transform transition-transform duration-200" :class="{ 'rotate-180': show_state }">
@@ -437,14 +437,14 @@ export default defineComponent({
               <div class="max-h-48 overflow-y-auto">
                 <!-- All States Option -->
                 <div
-                  class="px-4 py-3 hover:bg-blue-50 cursor-pointer transition-colors duration-150 flex items-center space-x-3 border-b border-gray-50"
-                  :class="{ 'bg-blue-100 text-blue-800': selected_state === 'All States' }"
+                  class="px-4 py-3 hover:bg-green-50 cursor-pointer transition-colors duration-150 flex items-center space-x-3 border-b border-gray-50"
+                  :class="{ 'bg-green-100 text-green-800': selected_state === 'All States' }"
                   @click="selectState('All States')"
                 >
                   <div class="w-2 h-2 rounded-full bg-gray-400"></div>
                   <span class="font-medium">All States</span>
                   <div class="ml-auto">
-                    <svg v-if="selected_state === 'All States'" class="w-4 h-4 text-blue-600" fill="currentColor" viewBox="0 0 20 20">
+                    <svg v-if="selected_state === 'All States'" class="w-4 h-4 text-green-600" fill="currentColor" viewBox="0 0 20 20">
                       <path fill-rule="evenodd" d="M16.707 5.293a1 1 0 010 1.414l-8 8a1 1 0 01-1.414 0l-4-4a1 1 0 011.414-1.414L8 12.586l7.293-7.293a1 1 0 011.414 0z" clip-rule="evenodd"/>
                     </svg>
                   </div>
@@ -454,14 +454,14 @@ export default defineComponent({
                 <div
                   v-for="(state, index) in filteredStates"
                   :key="index"
-                  class="px-4 py-3 hover:bg-blue-50 cursor-pointer transition-colors duration-150 flex items-center space-x-3"
-                  :class="{ 'bg-blue-100 text-blue-800': selected_state === state.name }"
+                  class="px-4 py-3 hover:bg-green-50 cursor-pointer transition-colors duration-150 flex items-center space-x-3"
+                  :class="{ 'bg-green-100 text-green-800': selected_state === state.name }"
                   @click="selectState(index)"
                 >
                   <div class="w-2 h-2 rounded-full bg-green-500"></div>
                   <span>{{ state.name }}</span>
                   <div class="ml-auto">
-                    <svg v-if="selected_state === state.name" class="w-4 h-4 text-blue-600" fill="currentColor" viewBox="0 0 20 20">
+                    <svg v-if="selected_state === state.name" class="w-4 h-4 text-green-600" fill="currentColor" viewBox="0 0 20 20">
                       <path fill-rule="evenodd" d="M16.707 5.293a1 1 0 010 1.414l-8 8a1 1 0 01-1.414 0l-4-4a1 1 0 011.414-1.414L8 12.586l7.293-7.293a1 1 0 011.414 0z" clip-rule="evenodd"/>
                     </svg>
                   </div>
@@ -480,7 +480,7 @@ export default defineComponent({
           
           <!-- Filter Status Badge -->
           <div v-if="selected_state !== 'All States'" class="flex items-center space-x-2">
-            <span class="inline-flex items-center px-3 py-1 rounded-full text-xs font-medium bg-blue-100 text-blue-800">
+            <span class="inline-flex items-center px-3 py-1 rounded-full text-xs font-medium bg-green-100 text-green-800">
               <svg class="w-3 h-3 mr-1" fill="currentColor" viewBox="0 0 20 20">
                 <path fill-rule="evenodd" d="M3 3a1 1 0 011-1h12a1 1 0 011 1v3a1 1 0 01-.293.707L12 11.414V15a1 1 0 01-.293.707l-2 2A1 1 0 018 17v-5.586L3.293 6.707A1 1 0 013 6V3z" clip-rule="evenodd"/>
               </svg>
@@ -560,22 +560,22 @@ export default defineComponent({
         </div>
 
         <!-- Total In Progress Card -->
-        <div class="bg-white rounded-2xl shadow-lg hover:shadow-xl transition-all duration-300 overflow-hidden group border-l-4 border-blue-500">
+        <div class="bg-white rounded-2xl shadow-lg hover:shadow-xl transition-all duration-300 overflow-hidden group border-l-4 border-green-500">
           <div class="p-6">
             <div class="flex items-center justify-between">
               <div class="flex-1">
                 <div class="flex items-center mb-4">
-                  <div class="w-14 h-14 bg-blue-100 rounded-xl flex items-center justify-center mr-4 group-hover:scale-110 transition-transform duration-300">
-                    <svg class="w-7 h-7 text-blue-600" fill="currentColor" viewBox="0 0 24 24">
+                  <div class="w-14 h-14 bg-green-100 rounded-xl flex items-center justify-center mr-4 group-hover:scale-110 transition-transform duration-300">
+                    <svg class="w-7 h-7 text-green-600" fill="currentColor" viewBox="0 0 24 24">
                       <path d="M12,4V2A10,10 0 0,0 2,12H4A8,8 0 0,1 12,4Z"/>
                     </svg>
                   </div>
                   <div class="text-left">
-                    <p class="text-xl font-semibold text-blue-800">In Progress</p>
-                    <p class="text-sm text-blue-600 text-left">Active cases</p>
+                    <p class="text-xl font-semibold text-green-800">In Progress</p>
+                    <p class="text-sm text-green-600 text-left">Active cases</p>
                   </div>
                 </div>
-                <p class="text-5xl font-black text-blue-800 tracking-tight leading-none">
+                <p class="text-5xl font-black text-green-800 tracking-tight leading-none">
                   {{
                     progress_abattoir +
                     progress_aquaculture +

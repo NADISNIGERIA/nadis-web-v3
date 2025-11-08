@@ -11,7 +11,8 @@ import {
   createFindStateFunction,
   createFixLocationFunction,
   createGetDateFunction,
-  createSortedComputed
+  createSortedComputed,
+  createPaginationHandlers
 } from './GenericDataTableView.vue'
 
 // Define TypeScript interface for Outbreak report
@@ -95,61 +96,72 @@ export default defineComponent({
 
     // Vuetify data table state
     const itemsPerPage = ref(20)
+    const currentPage = ref(1)
     const selectedReports = ref<OutbreakReport[]>([])
     const sortBy = ref<any[]>([{ key: 'created_at', order: 'desc' }])
 
     const sortedOutbreak = computed(createSortedComputed(outbreak, sortBy))
 
-    // Define table headers with wider widths for long column names
-    const headers = ref([
-      { title: 'S/N', key: 'index', sortable: false, width: 60 },
-      { title: 'Created Date', key: 'created_at', sortable: true, width: 140 },
-      { title: 'Report State - LGA', key: 'state_lga', sortable: false, width: 180 },
-      { title: 'Disease Suspected', key: 'disease_name', sortable: true, width: 180 },
-      { title: 'Outbreak Type', key: 'outbreak_type', sortable: true, width: 150 },
-      { title: 'Outbreak Number', key: 'outbreak_num', sortable: false, width: 150 },
-      { title: 'Other Diseases', key: 'other_diseases', sortable: false, width: 180 },
-      { title: 'Is it a cluster?', key: 'cluster_type', sortable: false, width: 140 },
-      { title: 'Total Cluster', key: 'cluster', sortable: false, width: 130 },
-      { title: 'Dates - Occurred', key: 'date.occurred', sortable: false, width: 150 },
-      { title: 'Dates - Reported', key: 'date.reported', sortable: false, width: 150 },
-      { title: 'Dates - Investigated', key: 'date.investigated', sortable: false, width: 170 },
-      { title: 'Dates - Final Diagnosis', key: 'date.final_diagnosis', sortable: false, width: 180 },
-      { title: 'Locality (Facility) - Type', key: 'localty.facility_type', sortable: false, width: 200 },
-      { title: 'Locality (Facility) - Name', key: 'localty.facility_name', sortable: false, width: 200 },
-      { title: 'Location - Lat', key: 'location.lat', sortable: false, width: 130 },
-      { title: 'Location - Lng', key: 'location.lng', sortable: false, width: 130 },
-      { title: 'Animals Affected - Species Name', key: 'species.species_name', sortable: false, width: 220 },
-      { title: 'Animals Affected - Species Type', key: 'species.species_type', sortable: false, width: 220 },
-      { title: 'Age Group in weeks', key: 'age', sortable: false, width: 160 },
-      { title: 'Sex', key: 'sex', sortable: false, width: 80 },
-      { title: 'Production System', key: 'production_system', sortable: false, width: 170 },
-      { title: 'Control Means', key: 'control_means', sortable: false, width: 200 },
-      { title: 'Basis for Diagnosis', key: 'basis_for_diagnosis', sortable: false, width: 180 },
-      { title: 'Animals Susceptible', key: 'number_of_animals.total_animals', sortable: false, width: 180 },
-      { title: 'Number of Animals - Cases', key: 'number_of_animals.cases', sortable: false, width: 200 },
-      { title: 'Number of Animals - Deaths', key: 'number_of_animals.deaths', sortable: false, width: 200 },
-      { title: 'Number of Animals - Slaughter', key: 'number_of_animals.slaughter', sortable: false, width: 220 },
-      { title: 'Number of Animals - Recovered', key: 'number_of_animals.recovered', sortable: false, width: 220 },
-      { title: 'Number of Animals - Destroyed', key: 'number_of_animals.destroyed', sortable: false, width: 220 },
-      { title: 'Outbreak Stopped', key: 'was_outbreak_stopped', sortable: false, width: 160 },
-      { title: 'Vaccination Type', key: 'vaccination.vaccination_type', sortable: false, width: 170 },
-      { title: 'Vaccination - Vaccination Number', key: 'vaccination.vaccination_number', sortable: false, width: 240 },
-      { title: 'Vaccination - Source', key: 'vaccination.source', sortable: false, width: 180 },
-      { title: 'Vaccination - Batch Number', key: 'vaccination.batch_no', sortable: false, width: 220 },
-      { title: 'Expiry Date', key: 'vaccination.expiry_date', sortable: false, width: 140 },
-      { title: 'Vaccination - Was Vaccinated', key: 'vaccination.was_vaccinated', sortable: false, width: 220 },
-      { title: 'Action', key: 'actions', sortable: false, width: 180 }
-    ])
+    // Column visibility control with priority-based filtering
+    const columnVisibilityLevel = ref(2) // Start with essential view due to many columns
+    const allColumns = [
+      // Essential columns (priority 1-2)
+      { title: 'S/N', key: 'index', sortable: false, width: 60, priority: 1 },
+      { title: 'Created Date', key: 'created_at', sortable: true, width: 140, priority: 1 },
+      { title: 'Report State - LGA', key: 'state_lga', sortable: false, width: 180, priority: 1 },
+      { title: 'Disease Suspected', key: 'disease_name', sortable: true, width: 180, priority: 1 },
+      { title: 'Action', key: 'actions', sortable: false, width: 180, priority: 1 },
+      
+      // Standard columns (priority 3)
+      { title: 'Outbreak Type', key: 'outbreak_type', sortable: true, width: 150, priority: 2 },
+      { title: 'Species Name', key: 'species.species_name', sortable: false, width: 180, priority: 2 },
+      { title: 'Total Animals', key: 'number_of_animals.total_animals', sortable: false, width: 140, priority: 2 },
+      { title: 'Cases', key: 'number_of_animals.cases', sortable: false, width: 120, priority: 2 },
+      { title: 'Deaths', key: 'number_of_animals.deaths', sortable: false, width: 120, priority: 2 },
+      
+      // Detailed columns (priority 4)
+      { title: 'Outbreak Number', key: 'outbreak_num', sortable: false, width: 150, priority: 3 },
+      { title: 'Other Diseases', key: 'other_diseases', sortable: false, width: 180, priority: 3 },
+      { title: 'Is it a cluster?', key: 'cluster_type', sortable: false, width: 140, priority: 3 },
+      { title: 'Total Cluster', key: 'cluster', sortable: false, width: 130, priority: 3 },
+      { title: 'Species Type', key: 'species.species_type', sortable: false, width: 160, priority: 3 },
+      { title: 'Age Group (weeks)', key: 'age', sortable: false, width: 160, priority: 3 },
+      { title: 'Sex', key: 'sex', sortable: false, width: 80, priority: 3 },
+      { title: 'Production System', key: 'production_system', sortable: false, width: 170, priority: 3 },
+      { title: 'Recovered', key: 'number_of_animals.recovered', sortable: false, width: 120, priority: 3 },
+      { title: 'Slaughter', key: 'number_of_animals.slaughter', sortable: false, width: 120, priority: 3 },
+      { title: 'Destroyed', key: 'number_of_animals.destroyed', sortable: false, width: 120, priority: 3 },
+      
+      // Complete columns (priority 5)
+      { title: 'Date Occurred', key: 'date.occurred', sortable: false, width: 150, priority: 4 },
+      { title: 'Date Reported', key: 'date.reported', sortable: false, width: 150, priority: 4 },
+      { title: 'Date Investigated', key: 'date.investigated', sortable: false, width: 170, priority: 4 },
+      { title: 'Final Diagnosis Date', key: 'date.final_diagnosis', sortable: false, width: 180, priority: 4 },
+      { title: 'Facility Type', key: 'localty.facility_type', sortable: false, width: 160, priority: 4 },
+      { title: 'Facility Name', key: 'localty.facility_name', sortable: false, width: 160, priority: 4 },
+      { title: 'Location - Lat', key: 'location.lat', sortable: false, width: 130, priority: 4 },
+      { title: 'Location - Lng', key: 'location.lng', sortable: false, width: 130, priority: 4 },
+      { title: 'Control Means', key: 'control_means', sortable: false, width: 200, priority: 4 },
+      { title: 'Basis for Diagnosis', key: 'basis_for_diagnosis', sortable: false, width: 180, priority: 4 },
+      { title: 'Outbreak Stopped', key: 'was_outbreak_stopped', sortable: false, width: 160, priority: 4 },
+      { title: 'Vaccination Type', key: 'vaccination.vaccination_type', sortable: false, width: 170, priority: 4 },
+      { title: 'Vaccination Number', key: 'vaccination.vaccination_number', sortable: false, width: 180, priority: 4 },
+      { title: 'Vaccination Source', key: 'vaccination.source', sortable: false, width: 150, priority: 4 },
+      { title: 'Batch Number', key: 'vaccination.batch_no', sortable: false, width: 150, priority: 4 },
+      { title: 'Expiry Date', key: 'vaccination.expiry_date', sortable: false, width: 140, priority: 4 },
+      { title: 'Was Vaccinated', key: 'vaccination.was_vaccinated', sortable: false, width: 160, priority: 4 }
+    ]
+
+    const headers = computed(() => allColumns.filter(col => col.priority <= columnVisibilityLevel.value))
 
     watch(selected_category, () => {
-      getOutbreak()
+      load()
     })
     watch(selected_state, () => {
-      getOutbreak()
+      load()
     })
     watch(successful, () => {
-      getOutbreak()
+      load()
     })
     watch(export_to_excel, () => {
       exportTableToExcel()
@@ -204,6 +216,50 @@ export default defineComponent({
 
     const getDate = createGetDateFunction(months)
     const fixLocation = createFixLocationFunction()
+
+    // Create computed ref for values to use with pagination handlers
+    const currentValues = computed(() => {
+      let sort = 1
+      let progress = false
+      if (selected_category.value == 'Approved') {
+        sort = 1
+        progress = false
+      } else if (selected_category.value == 'Pending') {
+        sort = 0
+        progress = false
+      } else if (selected_category.value == 'In Progress') {
+        sort = 0
+        progress = true
+      }
+
+      return {
+        category: sort,
+        state: selected_state.value,
+        in_progress: progress
+      }
+    })
+
+    // Create pagination handlers for traditional pagination
+    const { handlePageChange, handlePageSizeChange } = createPaginationHandlers(
+      useOutbreak(),
+      currentValues
+    )
+
+    // Update load function to use page-based navigation
+    const load = () => {
+      currentPage.value = 1  // Reset to page 1 when loading new data
+      useOutbreak().getOutbreakPage(currentValues.value, 1, itemsPerPage.value)
+    }
+
+    // Sync currentPage with store pagination
+    watch(() => pagination.value.currentPage, (newPage) => {
+      currentPage.value = newPage
+    })
+
+    // Sync itemsPerPage changes
+    watch(itemsPerPage, (newSize) => {
+      handlePageSizeChange(newSize)
+    })
 
     const performAction = (action: string, docId: string) => {
       if (action === 'in_progress') {
@@ -370,7 +426,7 @@ export default defineComponent({
     }
 
     onMounted(() => {
-      getOutbreak()
+      load()  // Use the new load function
     })
 
     return {
@@ -379,7 +435,10 @@ export default defineComponent({
       decline_form,
       doc_id,
       headers,
+      allColumns,
+      columnVisibilityLevel,
       itemsPerPage,
+      currentPage,
       selectedReports,
       sortBy,
       getDate,
@@ -390,7 +449,10 @@ export default defineComponent({
       pagination,
       loadNextPage,
       performAction,
-      handleBulkAction
+      handleBulkAction,
+      handlePageChange,
+      handlePageSizeChange,
+      load
     }
   }
 })
@@ -404,20 +466,65 @@ export default defineComponent({
       @clear-selection="selectedReports = []"
     />
 
-    <!-- Vuetify Data Table -->
+    <!-- Column Visibility Controls -->
+    <v-card class="mb-4 pa-3" elevation="1">
+      <div class="d-flex align-center gap-3">
+        <span class="text-subtitle-2 text-medium-emphasis">Column View:</span>
+        <v-btn-toggle
+          v-model="columnVisibilityLevel"
+          variant="outlined"
+          size="small"
+          mandatory
+        >
+          <v-btn :value="2" size="small">
+            Essential
+            <v-tooltip activator="parent" location="top">
+              Show only the most important columns ({{ allColumns.filter(c => c.priority <= 2).length }} columns)
+            </v-tooltip>
+          </v-btn>
+          <v-btn :value="3" size="small">
+            Standard
+            <v-tooltip activator="parent" location="top">
+              Show standard view ({{ allColumns.filter(c => c.priority <= 3).length }} columns)
+            </v-tooltip>
+          </v-btn>
+          <v-btn :value="4" size="small">
+            Detailed
+            <v-tooltip activator="parent" location="top">
+              Show detailed view ({{ allColumns.filter(c => c.priority <= 4).length }} columns)
+            </v-tooltip>
+          </v-btn>
+          <v-btn :value="5" size="small">
+            Complete
+            <v-tooltip activator="parent" location="top">
+              Show all columns ({{ allColumns.length }} columns)
+            </v-tooltip>
+          </v-btn>
+        </v-btn-toggle>
+        <v-spacer></v-spacer>
+        <span class="text-caption text-medium-emphasis">
+          Showing {{ headers.length }} of {{ allColumns.length }} columns
+        </span>
+      </div>
+    </v-card>
+
+    <!-- Vuetify Data Table with Traditional Pagination -->
     <v-data-table
       v-model="selectedReports"
       v-model:items-per-page="itemsPerPage"
+      v-model:page="currentPage"
       v-model:sort-by="sortBy"
       :headers="headers"
       :items="sortedOutbreak"
       :loading="loading"
+      :items-per-page-options="[10, 20, 50, 100]"
+      :server-items-length="pagination.totalCount || sortedOutbreak.length"
+      @update:page="handlePageChange"
+      @update:items-per-page="handlePageSizeChange"
       show-select
       return-object
       item-value="doc_id"
-      class="elevation-1"
-      fixed-header
-      height="600px"
+      class="elevation-1 nadis-data-table"
     >
       <!-- Serial Number Column -->
       <template v-slot:item.index="{ index }">
@@ -586,24 +693,6 @@ export default defineComponent({
           <div class="text-gray-500 text-lg">No reports found</div>
           <div class="text-gray-400 text-sm mt-2">
             Try adjusting your filters or check back later
-          </div>
-        </div>
-      </template>
-
-      <!-- Bottom Slot for Load More -->
-      <template v-slot:bottom>
-        <div class="text-center pa-4">
-          <v-btn
-            v-if="pagination.hasMore"
-            @click="loadNextPage"
-            :loading="loading"
-            color="primary"
-            variant="outlined"
-          >
-            Load More
-          </v-btn>
-          <div v-else class="text-sm text-gray-500">
-            All reports loaded ({{ outbreak.length }} total)
           </div>
         </div>
       </template>
