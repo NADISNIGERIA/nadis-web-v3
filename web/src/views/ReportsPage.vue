@@ -1218,25 +1218,26 @@ export default defineComponent({
       try {
         switch (reportType) {
           case ReportType.ABATTOIR:
-            await useAbattoir().getAbattoir(values)
+            // Use page-based loader so totalCount is calculated immediately
+            await useAbattoir().getAbattoirPage(values, 1, 20)
             break
           case ReportType.OUTBREAK:
-            await useOutbreak().getOutbreak(values)
+            await useOutbreak().getOutbreakPage(values, 1, 20)
             break
           case ReportType.VACCINATION:
-            await useVaccination().getVaccination(values)
+            await useVaccination().getVaccinationPage(values, 1, 20)
             break
           case ReportType.SUSPICION:
-            await useSuspicion().getSuspicion(values)
+            await useSuspicion().getSuspicionPage(values, 1, 20)
             break
           case ReportType.VETERINARIAN:
-            await useVeterinarian().getVeterinarian(values)
+            await useVeterinarian().getVeterinarianPage(values, 1, 20)
             break
           case ReportType.LABORATORY:
-            await useLaboratory().getLaboratory(values)
+            await useLaboratory().getLaboratoryPage(values, 1, 20)
             break
           case ReportType.AQUACULTURE:
-            await useAquaculture().getAquaculture(values)
+            await useAquaculture().getAquaculturePage(values, 1, 20)
             break
         }
       } catch (err) {

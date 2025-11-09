@@ -9,9 +9,7 @@ import {
   BulkActionsToolbar,
   createFindStateFunction,
   createFixLocationFunction,
-  createGetDateFunction,
-  createSortedComputed,
-  createPaginationHandlers
+  createGetDateFunction
 } from './GenericDataTableView.vue'
 
 interface SuspicionReport {
@@ -73,10 +71,16 @@ export default defineComponent({
     })
 
     // Create pagination handlers
-    const { handlePageChange, handlePageSizeChange } = createPaginationHandlers(
-      suspicionStore,
-      valuesRef
-    )
+    const handlePageChange = (page: number) => {
+      currentPage.value = page
+      suspicionStore.getSuspicionPage(valuesRef.value, page, itemsPerPage.value)
+    }
+
+    const handlePageSizeChange = (newPageSize: number) => {
+      itemsPerPage.value = newPageSize
+      currentPage.value = 1
+      suspicionStore.getSuspicionPage(valuesRef.value, 1, newPageSize)
+    }
 
     // Column visibility control (simplified for space)
     const columnVisibilityLevel = ref(3)
@@ -109,11 +113,9 @@ export default defineComponent({
     
     const headers = computed(() => allColumns.filter(col => col.priority <= columnVisibilityLevel.value))
 
-    const sortedSuspicion = computed(createSortedComputed(suspicion, sortBy))
-
     // Dynamic table configuration based on data availability
     const tableConfig = computed(() => {
-      const dataCount = sortedSuspicion.value.length
+      const dataCount = suspicion.value.length
       // Use fixed height only when there are enough rows to benefit from scrolling
       const needsScrolling = dataCount > 10
       return {
@@ -338,7 +340,6 @@ export default defineComponent({
 
     return {
       suspicion,
-      sortedSuspicion,
       tableConfig,
       decline_form,
       doc_id,
@@ -390,14 +391,15 @@ export default defineComponent({
       </div>
     </v-card>
 
-    <v-data-table
+    <v-data-table-server
       v-model="selectedReports"
       v-model:items-per-page="itemsPerPage"
       v-model:sort-by="sortBy"
       v-model:page="currentPage"
       :headers="headers"
-      :items="sortedSuspicion"
+      :items="suspicion"
       :loading="loading"
+      :items-per-page-options="[10, 20, 50, 100]"
       :items-length="pagination.totalCount"
       show-select
       return-object
@@ -585,7 +587,7 @@ export default defineComponent({
           </div>
         </div>
       </template>
-    </v-data-table>
+    </v-data-table-server>
 
     <!-- Decline Form Modal -->
     <suspicion-decline-form

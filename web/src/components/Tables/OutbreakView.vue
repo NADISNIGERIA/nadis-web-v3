@@ -10,9 +10,7 @@ import {
   BulkActionsToolbar,
   createFindStateFunction,
   createFixLocationFunction,
-  createGetDateFunction,
-  createSortedComputed,
-  createPaginationHandlers
+  createGetDateFunction
 } from './GenericDataTableView.vue'
 
 // Define TypeScript interface for Outbreak report
@@ -99,8 +97,6 @@ export default defineComponent({
     const currentPage = ref(1)
     const selectedReports = ref<OutbreakReport[]>([])
     const sortBy = ref<any[]>([{ key: 'created_at', order: 'desc' }])
-
-    const sortedOutbreak = computed(createSortedComputed(outbreak, sortBy))
 
     // Column visibility control with priority-based filtering
     const columnVisibilityLevel = ref(2) // Start with essential view due to many columns
@@ -240,10 +236,16 @@ export default defineComponent({
     })
 
     // Create pagination handlers for traditional pagination
-    const { handlePageChange, handlePageSizeChange } = createPaginationHandlers(
-      useOutbreak(),
-      currentValues
-    )
+    const handlePageChange = (page: number) => {
+      currentPage.value = page
+      useOutbreak().getOutbreakPage(currentValues.value, page, itemsPerPage.value)
+    }
+
+    const handlePageSizeChange = (newPageSize: number) => {
+      itemsPerPage.value = newPageSize
+      currentPage.value = 1
+      useOutbreak().getOutbreakPage(currentValues.value, 1, newPageSize)
+    }
 
     // Update load function to use page-based navigation
     const load = () => {
@@ -431,7 +433,6 @@ export default defineComponent({
 
     return {
       outbreak,
-      sortedOutbreak,
       decline_form,
       doc_id,
       headers,
@@ -508,17 +509,17 @@ export default defineComponent({
       </div>
     </v-card>
 
-    <!-- Vuetify Data Table with Traditional Pagination -->
-    <v-data-table
+    <!-- Vuetify Data Table Server with Traditional Pagination -->
+    <v-data-table-server
       v-model="selectedReports"
       v-model:items-per-page="itemsPerPage"
       v-model:page="currentPage"
       v-model:sort-by="sortBy"
       :headers="headers"
-      :items="sortedOutbreak"
+      :items="outbreak"
       :loading="loading"
       :items-per-page-options="[10, 20, 50, 100]"
-      :server-items-length="pagination.totalCount || sortedOutbreak.length"
+      :items-length="pagination.totalCount"
       @update:page="handlePageChange"
       @update:items-per-page="handlePageSizeChange"
       show-select
@@ -696,7 +697,7 @@ export default defineComponent({
           </div>
         </div>
       </template>
-    </v-data-table>
+    </v-data-table-server>
 
     <!-- Decline Form Modal -->
     <outbreak-decline-form

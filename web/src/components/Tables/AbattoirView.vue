@@ -10,9 +10,7 @@ import {
   BulkActionsToolbar,
   createFindStateFunction,
   createFixLocationFunction,
-  createGetDateFunction,
-  createSortedComputed,
-  createPaginationHandlers
+  createGetDateFunction
 } from './GenericDataTableView.vue'
 
 // Define TypeScript interface for Abattoir report
@@ -93,11 +91,9 @@ export default defineComponent({
     const sortBy = ref<any[]>([{ key: 'created_at', order: 'desc' }])
     const currentPage = ref(1)
 
-    const sortedAbattoir = computed(createSortedComputed(abattoir, sortBy))
-
     // Dynamic table configuration based on data availability
     const tableConfig = computed(() => {
-      const dataCount = sortedAbattoir.value.length
+      const dataCount = abattoir.value.length
       // Use fixed height only when there are enough rows to benefit from scrolling
       const needsScrolling = dataCount > 10
       return {
@@ -129,10 +125,16 @@ export default defineComponent({
     })
 
     // Create pagination handlers
-    const { handlePageChange, handlePageSizeChange } = createPaginationHandlers(
-      useAbattoir(),
-      valuesRef
-    )
+    const handlePageChange = (page: number) => {
+      currentPage.value = page
+      useAbattoir().getAbattoirPage(valuesRef.value, page, itemsPerPage.value)
+    }
+
+    const handlePageSizeChange = (newPageSize: number) => {
+      itemsPerPage.value = newPageSize
+      currentPage.value = 1
+      useAbattoir().getAbattoirPage(valuesRef.value, 1, newPageSize)
+    }
 
     // Define all available columns with priority levels for responsive display
     const allColumns = [
@@ -374,7 +376,6 @@ export default defineComponent({
 
     return {
       abattoir,
-      sortedAbattoir,
       tableConfig,
       decline_form,
       doc_id,
@@ -451,15 +452,16 @@ export default defineComponent({
       </div>
     </v-card>
 
-    <!-- Vuetify Data Table -->
-    <v-data-table
+    <!-- Vuetify Data Table Server -->
+    <v-data-table-server
       v-model="selectedReports"
       v-model:items-per-page="itemsPerPage"
       v-model:sort-by="sortBy"
       v-model:page="currentPage"
       :headers="headers"
-      :items="sortedAbattoir"
+      :items="abattoir"
       :loading="loading"
+      :items-per-page-options="[10, 20, 50, 100]"
       :items-length="pagination.totalCount"
       show-select
       return-object
@@ -617,7 +619,7 @@ export default defineComponent({
           </div>
         </div>
       </template>
-    </v-data-table>
+    </v-data-table-server>
 
     <!-- Decline Form Modal -->
     <abattoir-decline-form

@@ -9,9 +9,7 @@ import {
   BulkActionsToolbar,
   createFindStateFunction,
   createFixLocationFunction,
-  createGetDateFunction,
-  createSortedComputed,
-  createPaginationHandlers
+  createGetDateFunction
 } from './GenericDataTableView.vue'
 
 // Define TypeScript interface for Aquaculture report
@@ -102,11 +100,9 @@ export default defineComponent({
       selected_state: selected_state.value
     }))
 
-    const sortedAquaculture = computed(createSortedComputed(aquaculture, sortBy))
-
     // Dynamic table configuration based on data availability
     const tableConfig = computed(() => {
-      const dataCount = sortedAquaculture.value.length
+      const dataCount = aquaculture.value.length
       // Use fixed height only when there are enough rows to benefit from scrolling
       const needsScrolling = dataCount > 10
       return {
@@ -115,11 +111,17 @@ export default defineComponent({
       }
     })
 
-    // Pagination handlers
-    const { handlePageChange, handlePageSizeChange } = createPaginationHandlers(
-      currentPage,
-      itemsPerPage
-    )
+    // Create pagination handlers
+    const handlePageChange = (page: number) => {
+      currentPage.value = page
+      useAquaculture().getAquaculturePage(valuesRef.value, page, itemsPerPage.value)
+    }
+
+    const handlePageSizeChange = (newPageSize: number) => {
+      itemsPerPage.value = newPageSize
+      currentPage.value = 1
+      useAquaculture().getAquaculturePage(valuesRef.value, 1, newPageSize)
+    }
 
     // Define table headers with exact column names from original
     // Column visibility control (condensed for the very wide table)
@@ -368,7 +370,6 @@ export default defineComponent({
 
     return {
       aquaculture,
-      sortedAquaculture,
       tableConfig,
       decline_form,
       doc_id,
@@ -445,14 +446,15 @@ export default defineComponent({
       </div>
     </v-card>
 
-    <!-- Vuetify Data Table -->
-    <v-data-table
+    <!-- Vuetify Data Table Server -->
+    <v-data-table-server
       v-model="selectedReports"
       v-model:items-per-page="itemsPerPage"
       v-model:page="currentPage"
       v-model:sort-by="sortBy"
       :headers="headers"
-      :items="sortedAquaculture"
+      :items="aquaculture"
+      :items-per-page-options="[10, 20, 50, 100]"
       :items-length="pagination.totalCount"
       :loading="loading"
       show-select
@@ -695,7 +697,7 @@ export default defineComponent({
           </div>
         </div>
       </template>
-    </v-data-table>
+    </v-data-table-server>
 
     <!-- Decline Form Modal -->
     <aquaculture-decline-form

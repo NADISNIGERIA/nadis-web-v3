@@ -10,7 +10,8 @@ import {
   where,
   orderBy,
   limit,
-  startAfter
+  startAfter,
+  getCountFromServer
 } from 'firebase/firestore'
 import { defineStore } from 'pinia'
 
@@ -29,7 +30,8 @@ export const useVeterinarian = defineStore('veterinarian', {
       pageCursors: {} as any, // Store cursors for each page for efficient navigation
       totalPages: 0
     },
-    cache: new Map()
+    cache: new Map(),
+    currentFilters: null as any
   }),
   actions: {
     // Cache management methods
@@ -72,6 +74,20 @@ export const useVeterinarian = defineStore('veterinarian', {
       this.pagination.currentPage = 1
       this.pagination.hasMore = true
       this.pagination.lastVisible = null
+      this.pagination.totalCount = 0
+      this.pagination.pageCursors = {}
+      this.pagination.totalPages = 0
+    },
+
+    // Reset pagination but preserve totalCount to avoid "0 - 0 of 0" flash
+    resetPaginationSoft() {
+      this.pagination = {
+        ...this.pagination,
+        currentPage: 1,
+        hasMore: true,
+        lastVisible: null,
+        pageCursors: {}
+      }
     },
     async show_in_progress_a_state(state: any) {
       this.veterinarian = []
@@ -95,6 +111,42 @@ export const useVeterinarian = defineStore('veterinarian', {
       })
       this.veterinarian = value.sort((a: any, b: any) => b.created_at - a.created_at)
     },
+
+    async getVeterinarianCount(values: any) {
+      try {
+        const state = values.state
+        let queryRef = collection(fb.db, 'veterinarian_reports')
+
+        const queryConstraints = []
+        
+        // Apply the exact same logic as the data query
+        let sort = false;
+        if (values.category) {
+          sort = true;
+        } else {
+          sort = false;
+        }
+        
+        // Use the same approved filter as the data query
+        queryConstraints.push(where('approved', '==', sort))
+        
+        if (state && state !== 'All States') {
+          queryConstraints.push(where('state', '==', state))
+        }
+        
+        // Always add finished = true for main data queries
+        queryConstraints.push(where('finished', '==', true))
+
+        queryRef = query(collection(fb.db, 'veterinarian_reports'), ...queryConstraints)
+
+        const snapshot = await getCountFromServer(queryRef)
+        return snapshot.data().count
+      } catch (error) {
+        console.error('Error getting veterinarian count:', error)
+        return 0
+      }
+    },
+
     async show_in_progress_all_states() {
       const docs = await getDocs(
         query(collection(fb.db, 'veterinarian_reports'), where('finished', '==', false))
@@ -232,12 +284,29 @@ export const useVeterinarian = defineStore('veterinarian', {
     async getVeterinarianPage(values: any, page = 1, pageSize = 20) {
       try {
         this.loading = true;
+        
+        // Update pageSize in pagination state
+        this.pagination.pageSize = pageSize;
+        
         const state = values.state;
         let sort = false;
 
-        // Check cache first
+        // Create a filter key to detect status/filter changes
+        const currentFilterKey = JSON.stringify({
+          state: values.state,
+          in_progress: values.in_progress,
+          category: values.category
+        });
+
+        // Check if filters have changed - if so, reset pagination completely
+        if (this.currentFilters !== currentFilterKey) {
+          this.currentFilters = currentFilterKey;
+          this.resetPagination(); // Full reset when status changes
+        }
+
+        // Check cache first (only after filter change check)
         const cacheKey = `${JSON.stringify(values)}_page_${page}`;
-        if (this.pagination.pageCursors[cacheKey]) {
+        if (this.pagination.pageCursors && this.pagination.pageCursors[cacheKey]) {
           this.veterinarian = this.pagination.pageCursors[cacheKey].data;
           this.pagination.currentPage = page;
           this.loading = false;
@@ -245,11 +314,8 @@ export const useVeterinarian = defineStore('veterinarian', {
         }
 
         if (values.in_progress == true) {
-          if (state != 'All States') {
-            await this.show_in_progress_a_state(state);
-          } else {
-            await this.show_in_progress_all_states();
-          }
+          // Handle in-progress reports with pagination
+          await this.loadInProgressPagesSequentially(values, page, pageSize, state);
           this.pagination.currentPage = page;
           this.loading = false;
           return;
@@ -285,7 +351,7 @@ export const useVeterinarian = defineStore('veterinarian', {
         const cacheKey = `${JSON.stringify(values)}_page_${page}`;
         
         // Check if this page is already cached
-        if (this.pagination.pageCursors[cacheKey]) {
+        if (this.pagination.pageCursors && this.pagination.pageCursors[cacheKey]) {
           currentCursor = this.pagination.pageCursors[cacheKey].cursor;
           if (page === targetPage) {
             this.veterinarian = this.pagination.pageCursors[cacheKey].data;
@@ -366,10 +432,27 @@ export const useVeterinarian = defineStore('veterinarian', {
           this.veterinarian = value;
         }
 
-        // Update total count and pages (estimate based on page size)
+        // Update total count and pages - get accurate count on first page
         if (page === 1) {
-          // Rough estimate - in production you might want to use a count query
-          this.pagination.totalCount = Math.max(value.length * 10, pageSize * 5);
+          // Get accurate total count from server
+          try {
+            this.pagination.totalCount = await this.getVeterinarianCount(values);
+            this.pagination.totalPages = Math.ceil(this.pagination.totalCount / pageSize);
+          } catch (error) {
+            // Fallback to estimation if count fails
+            this.pagination.totalCount = Math.max(pageSize * 3, value.length + pageSize * 2)
+            this.pagination.totalPages = Math.ceil(this.pagination.totalCount / pageSize);
+          }
+        } else {
+          // For subsequent pages, update total based on what we've seen
+          const currentTotal = ((page - 1) * pageSize) + docs.docs.length;
+          if (docs.docs.length === pageSize) {
+            // Still getting full pages, estimate more
+            this.pagination.totalCount = Math.max(this.pagination.totalCount, currentTotal + pageSize);
+          } else {
+            // This is the last page
+            this.pagination.totalCount = currentTotal;
+          }
           this.pagination.totalPages = Math.ceil(this.pagination.totalCount / pageSize);
         }
 
@@ -380,6 +463,134 @@ export const useVeterinarian = defineStore('veterinarian', {
           break;
         }
       }
+    },
+
+    // Helper method to load in-progress reports with pagination
+    async loadInProgressPagesSequentially(values: any, targetPage: number, pageSize: number, state: string) {
+      let currentCursor = null
+      
+      for (let page = 1; page <= targetPage; page++) {
+        const cacheKey = `${JSON.stringify(values)}_inprogress_page_${page}`
+        
+        if (this.pagination.pageCursors && this.pagination.pageCursors[cacheKey]) {
+          currentCursor = this.pagination.pageCursors[cacheKey].cursor
+          if (page === targetPage) {
+            this.veterinarian = this.pagination.pageCursors[cacheKey].data
+          }
+          continue
+        }
+
+        let queryRef: any
+        
+        if (state != 'All States') {
+          if (currentCursor) {
+            queryRef = query(
+              collection(fb.db, 'veterinarian_reports'),
+              where('state', '==', state),
+              where('finished', '==', false),
+              startAfter(currentCursor),
+              limit(pageSize)
+            )
+          } else {
+            queryRef = query(
+              collection(fb.db, 'veterinarian_reports'),
+              where('state', '==', state),
+              where('finished', '==', false),
+              limit(pageSize)
+            )
+          }
+        } else {
+          if (currentCursor) {
+            queryRef = query(
+              collection(fb.db, 'veterinarian_reports'),
+              where('finished', '==', false),
+              startAfter(currentCursor),
+              limit(pageSize)
+            )
+          } else {
+            queryRef = query(
+              collection(fb.db, 'veterinarian_reports'),
+              where('finished', '==', false),
+              limit(pageSize)
+            )
+          }
+        }
+
+        const docs = await getDocs(queryRef)
+        let value = [] as any
+        this.reporter_state = []
+
+        docs.forEach((doc) => {
+          const unit = doc.data()
+          unit.doc_id = doc.id
+          this.getReporterState({
+            uid: doc.data().uid,
+            doc_id: doc.id
+          })
+          value.push(unit)
+        })
+
+        value.sort((a: any, b: any) => b.created_at - a.created_at)
+
+        const lastDoc = docs.docs[docs.docs.length - 1] || null
+        this.pagination.pageCursors[cacheKey] = {
+          data: value,
+          cursor: lastDoc
+        }
+
+        currentCursor = lastDoc
+
+        if (page === targetPage) {
+          this.veterinarian = value
+        }
+
+        if (page === 1) {
+          try {
+            let countQueryRef: any
+            if (state != 'All States') {
+              countQueryRef = query(
+                collection(fb.db, 'veterinarian_reports'),
+                where('state', '==', state),
+                where('finished', '==', false)
+              )
+            } else {
+              countQueryRef = query(
+                collection(fb.db, 'veterinarian_reports'),
+                where('finished', '==', false)
+              )
+            }
+            
+            const snapshot = await getCountFromServer(countQueryRef)
+            this.pagination.totalCount = snapshot.data().count
+            this.pagination.totalPages = Math.ceil(this.pagination.totalCount / pageSize)
+          } catch (error) {
+            if (docs.docs.length === pageSize) {
+              this.pagination.totalCount = pageSize * 3
+            } else {
+              this.pagination.totalCount = docs.docs.length
+            }
+            this.pagination.totalPages = Math.ceil(this.pagination.totalCount / pageSize)
+          }
+        } else {
+          const currentTotal = ((page - 1) * pageSize) + docs.docs.length
+          if (docs.docs.length === pageSize) {
+            this.pagination.totalCount = Math.max(this.pagination.totalCount, currentTotal + pageSize)
+          } else {
+            this.pagination.totalCount = currentTotal
+          }
+          this.pagination.totalPages = Math.ceil(this.pagination.totalCount / pageSize)
+        }
+
+        this.pagination.lastVisible = lastDoc
+        this.pagination.hasMore = docs.docs.length === pageSize
+
+        if (docs.docs.length < pageSize) {
+          this.pagination.totalCount = ((page - 1) * pageSize) + docs.docs.length
+          break
+        }
+      }
+
+      this.pagination.currentPage = targetPage
     },
 
     async loadNextPage(values: any) {

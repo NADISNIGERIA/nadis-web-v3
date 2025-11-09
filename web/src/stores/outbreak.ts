@@ -10,7 +10,8 @@ import {
   where,
   orderBy,
   limit,
-  startAfter
+  startAfter,
+  getCountFromServer
 } from 'firebase/firestore'
 import { defineStore } from 'pinia'
 
@@ -30,7 +31,8 @@ export const useOutbreak = defineStore('outbreak', {
       totalPages: 0
     },
     cache: {} as any,
-    cacheExpiry: 5 * 60 * 1000 // 5 minutes
+    cacheExpiry: 5 * 60 * 1000, // 5 minutes
+    currentFilters: null as any // Track current filter state for pagination reset detection
   }),
   actions: {
     // Helper method to generate cache key
@@ -80,6 +82,53 @@ export const useOutbreak = defineStore('outbreak', {
         totalPages: 0
       }
     },
+
+    // Reset pagination but preserve totalCount to avoid "0 - 0 of 0" flash
+    resetPaginationSoft() {
+      this.pagination = {
+        ...this.pagination,
+        currentPage: 1,
+        hasMore: true,
+        lastVisible: null,
+        pageCursors: {}
+      }
+    },
+
+    async getOutbreakCount(values: any) {
+      try {
+        const state = values.state
+        let queryRef = collection(fb.db, 'outbreak_reports')
+
+        const queryConstraints = []
+        
+        // Apply the exact same logic as the data query
+        let sort = false;
+        if (values.category) {
+          sort = true;
+        } else {
+          sort = false;
+        }
+        
+        // Use the same approved filter as the data query
+        queryConstraints.push(where('approved', '==', sort))
+        
+        if (state && state !== 'All States') {
+          queryConstraints.push(where('state', '==', state))
+        }
+        
+        // Always add finished = true for main data queries
+        queryConstraints.push(where('finished', '==', true))
+
+        queryRef = query(collection(fb.db, 'outbreak_reports'), ...queryConstraints)
+
+        const snapshot = await getCountFromServer(queryRef)
+        return snapshot.data().count
+      } catch (error) {
+        console.error('Error getting outbreak count:', error)
+        return 0
+      }
+    },
+
     async getOutbreak(values: any, isNextPage = false, pageSize = 20) {
       try {
         this.loading = true
@@ -93,8 +142,8 @@ export const useOutbreak = defineStore('outbreak', {
             this.loading = false
             return
           }
-          // Reset pagination for new filters
-          this.resetPagination()
+          // Reset pagination for new filters (but keep totalCount to avoid "0 - 0 of 0" flash)
+          this.resetPaginationSoft()
         }
 
         if (values.in_progress == true) {
@@ -122,6 +171,8 @@ export const useOutbreak = defineStore('outbreak', {
             // Sort by created_at descending (client-side)
             value.sort((a: any, b: any) => b.created_at - a.created_at)
             this.outbreak = value
+            // Set totalCount for in-progress reports
+            this.pagination.totalCount = value.length
           } else {
             const docs = await getDocs(
               query(
@@ -144,6 +195,8 @@ export const useOutbreak = defineStore('outbreak', {
             // Sort by created_at descending (client-side)
             value.sort((a: any, b: any) => b.created_at - a.created_at)
             this.outbreak = value
+            // Set totalCount for in-progress reports
+            this.pagination.totalCount = value.length
           }
         } else if (values.in_progress == false) {
           let sort = false
@@ -232,9 +285,24 @@ export const useOutbreak = defineStore('outbreak', {
 
           this.outbreak = value
 
-          // Cache the data (only for first page)
+          // Calculate totalCount for proper pagination display
           if (!isNextPage) {
+            // For the first page, get an accurate count
+            this.pagination.pageSize = pageSize;
+            try {
+              this.pagination.totalCount = await this.getOutbreakCount(values)
+            } catch (error) {
+              // Fallback to estimation if count fails
+              if (docs.docs.length === pageSize) {
+                this.pagination.totalCount = Math.max(pageSize * 3, value.length + pageSize * 2)
+              } else {
+                this.pagination.totalCount = docs.docs.length
+              }
+            }
             this.setCachedData(values, value)
+          } else {
+            // For subsequent pages, update count estimate
+            this.pagination.totalCount = Math.max(this.pagination.totalCount, this.pagination.currentPage * pageSize)
           }
         }
       } catch (error) {
@@ -256,62 +324,106 @@ export const useOutbreak = defineStore('outbreak', {
       try {
         this.loading = true
         const state = values.state
+        let sort = false
 
-        // Update current page
-        this.pagination.currentPage = page
-        this.pagination.pageSize = pageSize
+        // Create a filter key to detect status/filter changes
+        const currentFilterKey = JSON.stringify({
+          state: values.state,
+          in_progress: values.in_progress,
+          category: values.category
+        });
 
-        if (values.in_progress == true) {
-          // Handle in-progress reports (no pagination needed, typically fewer items)
-          return await this.getOutbreak(values, false, pageSize)
+        // Check if filters have changed - if so, reset pagination completely
+        if (this.currentFilters !== currentFilterKey) {
+          this.currentFilters = currentFilterKey;
+          this.resetPagination(); // Full reset when status changes
         }
 
-        let sort = false
+        // Check cache first (only after filter change check)
+        const cacheKey = `${JSON.stringify(values)}_page_${page}`
+        if (this.pagination.pageCursors && this.pagination.pageCursors[cacheKey]) {
+          this.outbreak = this.pagination.pageCursors[cacheKey].data
+          this.pagination.currentPage = page
+          this.loading = false
+          return
+        }
+
+        if (values.in_progress == true) {
+          // Handle in-progress reports with pagination
+          await this.loadInProgressPagesSequentially(values, page, pageSize, state)
+          this.pagination.currentPage = page
+          this.loading = false
+          return
+        }
+
         if (values.category == 1 || values.category === true) {
           sort = true
         } else {
           sort = false
         }
 
-        // For page 1, start fresh
+        // For page 1, no cursor needed
         if (page === 1) {
-          this.pagination.pageCursors = {}
-          this.pagination.lastVisible = null
-          return await this.getOutbreak(values, false, pageSize)
-        }
-
-        // For subsequent pages, use cached cursors if available
-        const cursors = this.pagination.pageCursors
-        let queryRef: any
-
-        // Build base query
-        if (state != 'All States') {
-          queryRef = query(
-            collection(fb.db, 'outbreak_reports'),
-            where('approved', '==', sort),
-            where('state', '==', state),
-            where('finished', '==', true),
-            limit(pageSize)
-          )
+          await this.loadPagesSequentially(values, 1, pageSize, sort, state)
         } else {
-          queryRef = query(
-            collection(fb.db, 'outbreak_reports'),
-            where('approved', '==', sort),
-            where('finished', '==', true),
-            limit(pageSize)
-          )
+          // Load pages sequentially up to the requested page
+          await this.loadPagesSequentially(values, page, pageSize, sort, state)
         }
 
-        // If we have a cursor for the previous page, use it
-        const prevPageCursor = cursors[page - 1]
-        if (prevPageCursor) {
-          if (state != 'All States') {
+        this.pagination.currentPage = page
+      } catch (error) {
+        console.error('Error fetching outbreak page:', error)
+      } finally {
+        this.loading = false
+      }
+    },
+
+    // Helper method to load pages sequentially when cursor is not available
+    async loadPagesSequentially(values: any, targetPage: number, pageSize: number, sort: boolean, state: string) {
+      let currentCursor = null
+      
+      // Load pages sequentially to get to the target page
+      for (let page = 1; page <= targetPage; page++) {
+        const cacheKey = `${JSON.stringify(values)}_page_${page}`
+        
+        // Check if this page is already cached
+        if (this.pagination.pageCursors && this.pagination.pageCursors[cacheKey]) {
+          currentCursor = this.pagination.pageCursors[cacheKey].cursor
+          if (page === targetPage) {
+            this.outbreak = this.pagination.pageCursors[cacheKey].data
+          }
+          continue
+        }
+
+        // Build query
+        let queryRef: any
+        
+        if (state != 'All States') {
+          if (currentCursor) {
             queryRef = query(
               collection(fb.db, 'outbreak_reports'),
               where('approved', '==', sort),
               where('state', '==', state),
               where('finished', '==', true),
-              startAfter(prevPageCursor),
+              startAfter(currentCursor),
+              limit(pageSize)
+            )
+          } else {
+            queryRef = query(
+              collection(fb.db, 'outbreak_reports'),
+              where('approved', '==', sort),
+              where('state', '==', state),
+              where('finished', '==', true),
+              limit(pageSize)
+            )
+          }
+        } else {
+          if (currentCursor) {
+            queryRef = query(
+              collection(fb.db, 'outbreak_reports'),
+              where('approved', '==', sort),
+              where('finished', '==', true),
+              startAfter(currentCursor),
               limit(pageSize)
             )
           } else {
@@ -319,23 +431,140 @@ export const useOutbreak = defineStore('outbreak', {
               collection(fb.db, 'outbreak_reports'),
               where('approved', '==', sort),
               where('finished', '==', true),
-              startAfter(prevPageCursor),
               limit(pageSize)
             )
           }
-        } else {
-          // If no cursor available, we need to navigate sequentially
-          // This is a limitation of Firebase cursor-based pagination
-          // For better UX, we'll load from page 1 and navigate to the desired page
-          await this.loadPagesSequentially(values, page, pageSize)
-          return
         }
 
         const docs = await getDocs(queryRef)
         let value = [] as any
 
-        // Reset the array for page-based navigation
-        this.outbreak = []
+        docs.forEach((doc) => {
+          const unit = doc.data()
+          unit.doc_id = doc.id
+          this.getReporterState({
+            uid: doc.data().uid,
+            doc_id: doc.id
+          })
+          value.push(unit)
+        })
+
+        // Sort by created_at descending (client-side)
+        value.sort((a: any, b: any) => b.created_at - a.created_at)
+
+        // Cache this page
+        const lastDoc = docs.docs[docs.docs.length - 1] || null
+        this.pagination.pageCursors[cacheKey] = {
+          data: value,
+          cursor: lastDoc
+        }
+
+        // Update cursor for next iteration
+        currentCursor = lastDoc
+
+        // If this is the target page, set it as current data
+        if (page === targetPage) {
+          this.outbreak = value
+        }
+
+        // Update total count and pages - get accurate count on first page
+        if (page === 1) {
+          // Get accurate total count from server
+          try {
+            this.pagination.totalCount = await this.getOutbreakCount(values)
+            this.pagination.totalPages = Math.ceil(this.pagination.totalCount / pageSize)
+          } catch (error) {
+            // Fallback to estimation if count fails
+            if (docs.docs.length === pageSize) {
+              this.pagination.totalCount = pageSize * 10 // Conservative estimate
+            } else {
+              this.pagination.totalCount = docs.docs.length // Exact if less than page size
+            }
+            this.pagination.totalPages = Math.ceil(this.pagination.totalCount / pageSize)
+          }
+        } else {
+          // For subsequent pages, update total based on what we've seen
+          const currentTotal = ((page - 1) * pageSize) + docs.docs.length
+          if (docs.docs.length === pageSize) {
+            // Still getting full pages, estimate more
+            this.pagination.totalCount = Math.max(this.pagination.totalCount, currentTotal + pageSize)
+          } else {
+            // Last page reached, exact total
+            this.pagination.totalCount = currentTotal
+          }
+          this.pagination.totalPages = Math.ceil(this.pagination.totalCount / pageSize)
+        }
+
+        // Update pagination state
+        this.pagination.lastVisible = lastDoc
+        this.pagination.hasMore = docs.docs.length === pageSize
+
+        // If we got fewer documents than requested, we've reached the end
+        if (docs.docs.length < pageSize) {
+          this.pagination.totalCount = ((page - 1) * pageSize) + docs.docs.length
+          break
+        }
+      }
+
+      this.pagination.currentPage = targetPage
+    },
+
+    // Helper method to load in-progress reports with pagination
+    async loadInProgressPagesSequentially(values: any, targetPage: number, pageSize: number, state: string) {
+      let currentCursor = null
+      
+      // Load pages sequentially to get to the target page
+      for (let page = 1; page <= targetPage; page++) {
+        const cacheKey = `${JSON.stringify(values)}_inprogress_page_${page}`
+        
+        // Check if this page is already cached
+        if (this.pagination.pageCursors && this.pagination.pageCursors[cacheKey]) {
+          currentCursor = this.pagination.pageCursors[cacheKey].cursor
+          if (page === targetPage) {
+            this.outbreak = this.pagination.pageCursors[cacheKey].data
+          }
+          continue
+        }
+
+        // Build query with pagination
+        let queryRef: any
+        
+        if (state != 'All States') {
+          if (currentCursor) {
+            queryRef = query(
+              collection(fb.db, 'outbreak_reports'),
+              where('state', '==', state),
+              where('finished', '==', false),
+              startAfter(currentCursor),
+              limit(pageSize)
+            )
+          } else {
+            queryRef = query(
+              collection(fb.db, 'outbreak_reports'),
+              where('state', '==', state),
+              where('finished', '==', false),
+              limit(pageSize)
+            )
+          }
+        } else {
+          if (currentCursor) {
+            queryRef = query(
+              collection(fb.db, 'outbreak_reports'),
+              where('finished', '==', false),
+              startAfter(currentCursor),
+              limit(pageSize)
+            )
+          } else {
+            queryRef = query(
+              collection(fb.db, 'outbreak_reports'),
+              where('finished', '==', false),
+              limit(pageSize)
+            )
+          }
+        }
+
+        const docs = await getDocs(queryRef)
+        let value = [] as any
         this.reporter_state = []
 
         docs.forEach((doc) => {
@@ -351,69 +580,79 @@ export const useOutbreak = defineStore('outbreak', {
         // Sort by created_at descending (client-side)
         value.sort((a: any, b: any) => b.created_at - a.created_at)
 
-        // Update pagination state
-        this.pagination.lastVisible = docs.docs[docs.docs.length - 1] || null
-        this.pagination.hasMore = docs.docs.length === pageSize
-        
-        // Store cursor for this page
-        if (docs.docs.length > 0) {
-          this.pagination.pageCursors[page] = docs.docs[docs.docs.length - 1]
+        // Cache this page
+        const lastDoc = docs.docs[docs.docs.length - 1] || null
+        this.pagination.pageCursors[cacheKey] = {
+          data: value,
+          cursor: lastDoc
         }
 
-        // Estimate total count for traditional pagination
-        if (page === 1 && docs.docs.length === pageSize) {
-          this.pagination.totalCount = Math.max(pageSize * 3, value.length + pageSize * 2)
-        } else if (docs.docs.length < pageSize) {
-          this.pagination.totalCount = (page - 1) * pageSize + docs.docs.length
-          this.pagination.hasMore = false
-        } else {
-          this.pagination.totalCount = Math.max(this.pagination.totalCount, page * pageSize + pageSize)
+        // Update cursor for next iteration
+        currentCursor = lastDoc
+
+        // If this is the target page, set it as current data
+        if (page === targetPage) {
+          this.outbreak = value
         }
 
-        this.outbreak = value
-
-      } catch (error) {
-        console.error('Error fetching outbreak page:', error)
-      } finally {
-        this.loading = false
-      }
-    },
-
-    // Helper method to load pages sequentially when cursor is not available
-    async loadPagesSequentially(values: any, targetPage: number, pageSize: number) {
-      try {
-        // Start from page 1 and load sequentially to build cursors
-        this.pagination.pageCursors = {}
-        this.pagination.currentPage = 1
-        
-        // Load first page
-        await this.getOutbreak(values, false, pageSize)
-        
-        // Store cursor for page 1
-        if (this.pagination.lastVisible) {
-          this.pagination.pageCursors[1] = this.pagination.lastVisible
-        }
-
-        // Load subsequent pages until we reach target page
-        for (let page = 2; page <= targetPage; page++) {
-          if (this.pagination.hasMore) {
-            await this.getOutbreak(values, true, pageSize)
-            if (this.pagination.lastVisible) {
-              this.pagination.pageCursors[page] = this.pagination.lastVisible
+        // Update total count and pages - get accurate count on first page
+        if (page === 1) {
+          // Get accurate total count from server for in-progress reports
+          try {
+            // Create count query for in-progress reports
+            let countQueryRef: any
+            if (state != 'All States') {
+              countQueryRef = query(
+                collection(fb.db, 'outbreak_reports'),
+                where('state', '==', state),
+                where('finished', '==', false)
+              )
+            } else {
+              countQueryRef = query(
+                collection(fb.db, 'outbreak_reports'),
+                where('finished', '==', false)
+              )
             }
+            
+            const snapshot = await getCountFromServer(countQueryRef)
+            this.pagination.totalCount = snapshot.data().count
+            this.pagination.totalPages = Math.ceil(this.pagination.totalCount / pageSize)
+          } catch (error) {
+            // Fallback to estimation if count fails
+            if (docs.docs.length === pageSize) {
+              this.pagination.totalCount = pageSize * 3 // Conservative estimate
+            } else {
+              this.pagination.totalCount = docs.docs.length // Exact if less than page size
+            }
+            this.pagination.totalPages = Math.ceil(this.pagination.totalCount / pageSize)
           }
+        } else {
+          // For subsequent pages, update total based on what we've seen
+          const currentTotal = ((page - 1) * pageSize) + docs.docs.length
+          if (docs.docs.length === pageSize) {
+            // Still getting full pages, estimate more
+            this.pagination.totalCount = Math.max(this.pagination.totalCount, currentTotal + pageSize)
+          } else {
+            // Last page reached, exact total
+            this.pagination.totalCount = currentTotal
+          }
+          this.pagination.totalPages = Math.ceil(this.pagination.totalCount / pageSize)
         }
 
-        // Now load the target page data only
-        if (targetPage > 1 && this.pagination.pageCursors[targetPage - 1]) {
-          await this.getOutbreakPage(values, targetPage, pageSize)
-        }
+        // Update pagination state
+        this.pagination.lastVisible = lastDoc
+        this.pagination.hasMore = docs.docs.length === pageSize
 
-        this.pagination.currentPage = targetPage
-      } catch (error) {
-        console.error('Error loading pages sequentially:', error)
+        // If we got fewer documents than requested, we've reached the end
+        if (docs.docs.length < pageSize) {
+          this.pagination.totalCount = ((page - 1) * pageSize) + docs.docs.length
+          break
+        }
       }
+
+      this.pagination.currentPage = targetPage
     },
+
     async approve(doc_id: any) {
       this.loading = true
       const outbreak_doc = await getDoc(doc(fb.db, 'outbreak_reports', doc_id))
