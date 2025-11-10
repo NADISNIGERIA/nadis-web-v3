@@ -304,7 +304,8 @@ export const useVaccination = defineStore('vaccination', {
         }
 
         // Check cache first (only after filter change check)
-        const cacheKey = `${JSON.stringify(values)}_page_${page}`;
+        // Include pageSize in cache key to handle different page sizes
+        const cacheKey = `${JSON.stringify(values)}_page_${page}_size_${pageSize}`;
         if (this.pagination.pageCursors && this.pagination.pageCursors[cacheKey]) {
           this.vaccination = this.pagination.pageCursors[cacheKey].data;
           this.pagination.currentPage = page;
@@ -344,10 +345,11 @@ export const useVaccination = defineStore('vaccination', {
 
     async loadPagesSequentially(values: any, targetPage: number, pageSize: number, sort: boolean, state: string) {
       let currentCursor = null;
-      
+
+
       // Load pages sequentially to get to the target page
       for (let page = 1; page <= targetPage; page++) {
-        const cacheKey = `${JSON.stringify(values)}_page_${page}`;
+        const cacheKey = `${JSON.stringify(values)}_page_${page}_size_${pageSize}`;
         
         // Check if this page is already cached
         if (this.pagination.pageCursors && this.pagination.pageCursors[cacheKey]) {
@@ -467,11 +469,11 @@ export const useVaccination = defineStore('vaccination', {
     // Helper method to load in-progress reports with pagination
     async loadInProgressPagesSequentially(values: any, targetPage: number, pageSize: number, state: string) {
       let currentCursor = null
-      
+
       // Load pages sequentially to get to the target page
       for (let page = 1; page <= targetPage; page++) {
-        const cacheKey = `${JSON.stringify(values)}_inprogress_page_${page}`
-        
+        const cacheKey = `${JSON.stringify(values)}_inprogress_page_${page}_size_${pageSize}`
+
         // Check if this page is already cached
         if (this.pagination.pageCursors && this.pagination.pageCursors[cacheKey]) {
           currentCursor = this.pagination.pageCursors[cacheKey].cursor
@@ -714,6 +716,9 @@ export const useVaccination = defineStore('vaccination', {
             results.failed.push(docId)
           }
         }
+
+        // Clear pagination cache to force data reload
+        this.resetPagination()
 
         this.successful += 1
         return results

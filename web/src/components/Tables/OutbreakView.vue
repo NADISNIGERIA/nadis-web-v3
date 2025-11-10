@@ -235,16 +235,10 @@ export default defineComponent({
       }
     })
 
-    // Create pagination handlers for traditional pagination
-    const handlePageChange = (page: number) => {
-      currentPage.value = page
-      useOutbreak().getOutbreakPage(currentValues.value, page, itemsPerPage.value)
-    }
-
-    const handlePageSizeChange = (newPageSize: number) => {
-      itemsPerPage.value = newPageSize
-      currentPage.value = 1
-      useOutbreak().getOutbreakPage(currentValues.value, 1, newPageSize)
+    // Unified handler for all table option changes (page, itemsPerPage)
+    // This is the recommended Vuetify approach for v-data-table-server
+    const loadItems = ({ page, itemsPerPage }: any) => {
+      useOutbreak().getOutbreakPage(currentValues.value, page, itemsPerPage)
     }
 
     // Update load function to use page-based navigation
@@ -252,16 +246,6 @@ export default defineComponent({
       currentPage.value = 1  // Reset to page 1 when loading new data
       useOutbreak().getOutbreakPage(currentValues.value, 1, itemsPerPage.value)
     }
-
-    // Sync currentPage with store pagination
-    watch(() => pagination.value.currentPage, (newPage) => {
-      currentPage.value = newPage
-    })
-
-    // Sync itemsPerPage changes
-    watch(itemsPerPage, (newSize) => {
-      handlePageSizeChange(newSize)
-    })
 
     const performAction = (action: string, docId: string) => {
       if (action === 'in_progress') {
@@ -451,8 +435,7 @@ export default defineComponent({
       loadNextPage,
       performAction,
       handleBulkAction,
-      handlePageChange,
-      handlePageSizeChange,
+      loadItems,
       load
     }
   }
@@ -520,8 +503,7 @@ export default defineComponent({
       :loading="loading"
       :items-per-page-options="[10, 20, 50, 100]"
       :items-length="pagination.totalCount"
-      @update:page="handlePageChange"
-      @update:items-per-page="handlePageSizeChange"
+      @update:options="loadItems"
       show-select
       return-object
       item-value="doc_id"

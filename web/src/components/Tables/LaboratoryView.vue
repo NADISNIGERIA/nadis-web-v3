@@ -106,17 +106,10 @@ export default defineComponent({
       }
     })
 
-    // Create pagination handlers
-    // Create pagination handlers
-    const handlePageChange = (page: number) => {
-      currentPage.value = page
-      useLaboratory().getLaboratoryPage(valuesRef.value, page, itemsPerPage.value)
-    }
-
-    const handlePageSizeChange = (newPageSize: number) => {
-      itemsPerPage.value = newPageSize
-      currentPage.value = 1
-      useLaboratory().getLaboratoryPage(valuesRef.value, 1, newPageSize)
+    // Unified handler for all table option changes (page, itemsPerPage)
+    // This is the recommended Vuetify approach for v-data-table-server
+    const loadItems = ({ page, itemsPerPage }: any) => {
+      useLaboratory().getLaboratoryPage(valuesRef.value, page, itemsPerPage)
     }
 
     // Define all available columns with priority levels for responsive display
@@ -390,8 +383,7 @@ export default defineComponent({
       pagination,
       performAction,
       handleBulkAction,
-      handlePageChange,
-      handlePageSizeChange
+      loadItems
     }
   }
 })
@@ -445,8 +437,7 @@ export default defineComponent({
       class="elevation-1"
       :fixed-header="tableConfig.fixedHeader"
       :height="tableConfig.height"
-      @update:page="handlePageChange"
-      @update:items-per-page="handlePageSizeChange"
+      @update:options="loadItems"
     >
       <!-- Serial Number Column -->
       <template v-slot:item.index="{ index }">

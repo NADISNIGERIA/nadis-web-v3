@@ -312,7 +312,8 @@ export const useAbattoir = defineStore('abattoir', {
         }
 
         // Check cache first (only after filter change check)
-        const cacheKey = `${JSON.stringify(values)}_page_${page}`;
+        // Include pageSize in cache key to handle different page sizes
+        const cacheKey = `${JSON.stringify(values)}_page_${page}_size_${pageSize}`;
         if (this.pagination.pageCursors && this.pagination.pageCursors[cacheKey]) {
           this.abattoir = this.pagination.pageCursors[cacheKey].data;
           this.pagination.currentPage = page;
@@ -352,11 +353,11 @@ export const useAbattoir = defineStore('abattoir', {
 
     async loadPagesSequentially(values: any, targetPage: number, pageSize: number, sort: boolean, state: string) {
       let currentCursor = null;
-      
+
       // Load pages sequentially to get to the target page
       for (let page = 1; page <= targetPage; page++) {
-        const cacheKey = `${JSON.stringify(values)}_page_${page}`;
-        
+        const cacheKey = `${JSON.stringify(values)}_page_${page}_size_${pageSize}`;
+
         // Check if this page is already cached
         if (this.pagination.pageCursors && this.pagination.pageCursors[cacheKey]) {
           currentCursor = this.pagination.pageCursors[cacheKey].cursor;
@@ -479,11 +480,11 @@ export const useAbattoir = defineStore('abattoir', {
     // Helper method to load in-progress reports with pagination
     async loadInProgressPagesSequentially(values: any, targetPage: number, pageSize: number, state: string) {
       let currentCursor = null
-      
+
       // Load pages sequentially to get to the target page
       for (let page = 1; page <= targetPage; page++) {
-        const cacheKey = `${JSON.stringify(values)}_inprogress_page_${page}`
-        
+        const cacheKey = `${JSON.stringify(values)}_inprogress_page_${page}_size_${pageSize}`
+
         // Check if this page is already cached
         if (this.pagination.pageCursors && this.pagination.pageCursors[cacheKey]) {
           currentCursor = this.pagination.pageCursors[cacheKey].cursor
@@ -736,6 +737,9 @@ export const useAbattoir = defineStore('abattoir', {
             results.failed.push(docId)
           }
         }
+
+        // Clear pagination cache to force data reload
+        this.resetPagination()
 
         this.successful += 1
         return results
