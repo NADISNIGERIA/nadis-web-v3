@@ -113,7 +113,7 @@ export default defineComponent({
       <!-- Content -->
       <div class="relative z-10 flex flex-col justify-center items-center text-white p-12">
         <div class="text-center mb-8">
-          <h1 class="text-4xl font-bold mb-4">Nigeria Animal Disease Information System</h1>
+          <h1 class="text-4xl font-bold mb-4">National Animal Disease Information System</h1>
           <p class="text-xl opacity-90 mb-2">NADIS</p>
           <p class="text-lg opacity-80">Federal Ministry of Livestock Development</p>
         </div>
@@ -146,7 +146,7 @@ export default defineComponent({
         <!-- Mobile Header (visible on small screens) -->
         <div class="lg:hidden text-center mb-8 p-6 bg-primary text-white rounded-lg shadow-lg">
           <h1 class="text-xl font-bold mb-2">NADIS</h1>
-          <p class="text-sm opacity-90">Nigeria Animal Disease Information System</p>
+          <p class="text-sm opacity-90">National Animal Disease Information System</p>
         </div>
 
         <!-- Login Form -->

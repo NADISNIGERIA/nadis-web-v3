@@ -26,7 +26,11 @@ export default () => {
       showCancelButton: true,
       confirmButtonColor: '#005304',
       cancelButtonColor: '#d33',
-      confirmButtonText: 'Yes, please!'
+      confirmButtonText: 'Yes, please!',
+      customClass: {
+        confirmButton: 'swal-confirm-green',
+        popup: 'swal-popup-green'
+      }
     }).then((result) => {
       if (result.isConfirmed) {
         if (param == '') {

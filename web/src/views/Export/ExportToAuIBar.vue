@@ -83,10 +83,10 @@ export default defineComponent({
         </div>
       </div>
       <div
-        class="p-3 text-sm sm:px-4 sm:py-3 bg-card-5 rounded inline-block cursor-pointer shadow-md"
+        class="p-3 text-sm sm:px-4 sm:py-3 bg-white border-2 border-gray-200 hover:border-green-300 rounded inline-block cursor-pointer shadow-sm transition-colors duration-200"
         @click="exportToExcel()"
       >
-        <a href="javascript:;" class="">Export</a>
+        <a href="javascript:;" class="text-gray-800 font-medium">Export</a>
         <div class="inline-block sm:pl-2 pl-1">
           <export-icon></export-icon>
         </div>

@@ -1,7 +1,7 @@
 <template>
   <div class="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-4 mb-6">
     <!-- Total Reports Card -->
-    <div class="bg-white rounded-lg shadow-md p-6 border-l-4 border-blue-500">
+    <div class="bg-white rounded-lg shadow-md p-6 border-l-4 border-green-500">
       <div class="flex items-center">
         <div class="flex-1">
           <p class="text-sm font-medium text-gray-600">Total Reports</p>
@@ -9,8 +9,8 @@
           <p v-else class="text-2xl font-bold text-gray-900">{{ stats.total || 0 }}</p>
         </div>
         <div class="flex-shrink-0">
-          <div class="w-8 h-8 bg-blue-100 rounded-full flex items-center justify-center">
-            <svg v-if="!loading" class="w-4 h-4 text-blue-600" fill="currentColor" viewBox="0 0 20 20">
+          <div class="w-8 h-8 bg-green-100 rounded-full flex items-center justify-center">
+            <svg v-if="!loading" class="w-4 h-4 text-green-600" fill="currentColor" viewBox="0 0 20 20">
               <path d="M9 12l2 2 4-4m6 2a9 9 0 11-18 0 9 9 0 0118 0z"></path>
             </svg>
             <div v-else class="w-4 h-4 bg-gray-300 rounded animate-pulse"></div>

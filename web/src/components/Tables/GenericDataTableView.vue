@@ -15,20 +15,44 @@ import BulkActionsToolbar from './BulkActionsToolbar.vue'
  *    - sortBy = ref<any[]>([{ key: 'created_at', order: 'desc' }])
  *    - itemsPerPage = ref(20)
  *    - selectedReports = ref<ReportType[]>([])
+ *    - currentPage = ref(1)
  *
  * 2. SORTING COMPUTED PROPERTY:
  *    See `createSortedComputed()` utility below for the exact pattern
  *
- * 3. UTILITY FUNCTIONS (exported):
+ * 3. PAGINATION PATTERNS:
+ *    Two approaches available:
+ *    a) Traditional pagination: Use `getOutbreakPage(values, page, pageSize)`
+ *    b) Load more pagination: Use `loadNextPage(values)`
+ *
+ * 4. UTILITY FUNCTIONS (exported):
  *    - createGetDateFunction(monthsRef): Function - Create date formatter
  *    - createFixLocationFunction(): Function - Create location formatter
  *    - createFindStateFunction(reporterStateRef): Function - Create state finder
  *    - createSortedComputed(dataRef, sortByRef): Function - Create sorting computed
+ *    - createPaginationHandlers(store, values): Object - Create pagination handlers
  *
- * 4. REUSABLE COMPONENTS (exported):
+ * 5. REUSABLE COMPONENTS (exported):
  *    - BulkActionsToolbar - Bulk editing toolbar with dropdown
  *
- * 5. VUETIFY TABLE BINDINGS:
+ * 6. VUETIFY TABLE BINDINGS (Traditional Pagination):
+ *    v-model="selectedReports"
+ *    v-model:items-per-page="itemsPerPage"
+ *    v-model:page="currentPage"
+ *    v-model:sort-by="sortBy"
+ *    :headers="headers"
+ *    :items="sortedData"
+ *    :loading="loading"
+ *    :items-per-page-options="[10, 20, 50, 100]"
+ *    :server-items-length="totalItems"
+ *    @update:page="handlePageChange"
+ *    @update:items-per-page="handlePageSizeChange"
+ *    show-select
+ *    return-object
+ *    item-value="doc_id"
+ *    class="elevation-1"
+ *
+ * 7. VUETIFY TABLE BINDINGS (Load More Pagination):
  *    v-model="selectedReports"
  *    v-model:items-per-page="itemsPerPage"
  *    v-model:sort-by="sortBy"
@@ -41,6 +65,7 @@ import BulkActionsToolbar from './BulkActionsToolbar.vue'
  *    class="elevation-1"
  *    fixed-header
  *    height="600px"
+ *    + v-slot:bottom template with Load More button
  *
  * USAGE EXAMPLE:
  *
@@ -162,6 +187,52 @@ export const createSortedComputed = (dataRef: any, sortByRef: any) => {
 
       return sortConfig.order === 'asc' ? comparison : -comparison
     })
+  }
+}
+
+// CREATE PAGINATION HANDLERS FUNCTION - Used for traditional pagination
+export const createPaginationHandlers = (store: any, valuesRef: any) => {
+  const handlePageChange = (page: number) => {
+    if (typeof store.getOutbreakPage === 'function') {
+      store.getOutbreakPage(valuesRef.value, page, store.pagination.pageSize)
+    } else if (typeof store.getAbattoirPage === 'function') {
+      store.getAbattoirPage(valuesRef.value, page, store.pagination.pageSize)
+    } else if (typeof store.getLaboratoryPage === 'function') {
+      store.getLaboratoryPage(valuesRef.value, page, store.pagination.pageSize)
+    } else if (typeof store.getSuspicionPage === 'function') {
+      store.getSuspicionPage(valuesRef.value, page, store.pagination.pageSize)
+    } else if (typeof store.getVaccinationPage === 'function') {
+      store.getVaccinationPage(valuesRef.value, page, store.pagination.pageSize)
+    } else if (typeof store.getVeterinarianPage === 'function') {
+      store.getVeterinarianPage(valuesRef.value, page, store.pagination.pageSize)
+    } else if (typeof store.getAquaculturePage === 'function') {
+      store.getAquaculturePage(valuesRef.value, page, store.pagination.pageSize)
+    }
+  }
+
+  const handlePageSizeChange = (newPageSize: number) => {
+    // Reset to page 1 when changing page size
+    const newValues = { ...valuesRef.value }
+    if (typeof store.getOutbreakPage === 'function') {
+      store.getOutbreakPage(newValues, 1, newPageSize)
+    } else if (typeof store.getAbattoirPage === 'function') {
+      store.getAbattoirPage(newValues, 1, newPageSize)
+    } else if (typeof store.getLaboratoryPage === 'function') {
+      store.getLaboratoryPage(newValues, 1, newPageSize)
+    } else if (typeof store.getSuspicionPage === 'function') {
+      store.getSuspicionPage(newValues, 1, newPageSize)
+    } else if (typeof store.getVaccinationPage === 'function') {
+      store.getVaccinationPage(newValues, 1, newPageSize)
+    } else if (typeof store.getVeterinarianPage === 'function') {
+      store.getVeterinarianPage(newValues, 1, newPageSize)
+    } else if (typeof store.getAquaculturePage === 'function') {
+      store.getAquaculturePage(newValues, 1, newPageSize)
+    }
+  }
+
+  return {
+    handlePageChange,
+    handlePageSizeChange
   }
 }
 

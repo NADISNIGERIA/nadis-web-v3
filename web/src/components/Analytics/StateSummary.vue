@@ -5,7 +5,7 @@ import { useDiseaseRate } from './../../stores/disease_rate'
 export default defineComponent({
   setup() {
     const pieData = ref([
-      { color: '#9bddff', value: 35, name: '' },
+      { color: '#9bffb5', value: 35, name: '' },
       { color: '#ff6d6b', value: 20, name: '' },
       { color: '#febb5c', value: 20, name: '' },
       { color: '#aaa1ff', value: 25, name: '' }
@@ -174,7 +174,7 @@ export default defineComponent({
     const pieStyles = () => {
       const percentages = calculate()
       const pieData = [
-        { color: '#9bddff', value: percentages.firstPercentage },
+        { color: '#9bffb5', value: percentages.firstPercentage },
         { color: '#ff6d6b', value: percentages.secondPercentage },
         { color: '#febb5c', value: percentages.thirdPercentage },
         { color: '#aaa1ff', value: percentages.fourthPercentage }

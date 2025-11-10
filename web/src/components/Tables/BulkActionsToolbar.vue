@@ -31,9 +31,9 @@ const clearSelection = () => {
 <template>
   <div
     v-if="selectedReports.length > 0"
-    class="mb-4 p-4 bg-blue-50 rounded-lg flex items-center justify-between"
+    class="mb-4 p-4 bg-green-50 rounded-lg flex items-center justify-between"
   >
-    <span class="text-sm font-medium text-blue-900">
+    <span class="text-sm font-medium text-green-900">
       {{ selectedReports.length }} report(s) selected
     </span>
     <div class="flex gap-2 relative">
@@ -61,9 +61,9 @@ const clearSelection = () => {
           </button>
           <button
             @click="handleBulkAction('in_progress')"
-            class="w-full text-left px-4 py-2 text-sm hover:bg-blue-50 text-gray-700 flex items-center gap-2"
+            class="w-full text-left px-4 py-2 text-sm hover:bg-green-50 text-gray-700 flex items-center gap-2"
           >
-            <span class="w-2 h-2 rounded-full bg-blue-500"></span>
+            <span class="w-2 h-2 rounded-full bg-green-500"></span>
             Set to In Progress
           </button>
           <button

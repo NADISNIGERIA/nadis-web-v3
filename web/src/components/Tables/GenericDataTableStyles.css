@@ -1,17 +1,80 @@
 :deep(.v-data-table) {
   font-size: 0.875rem;
+  /* Subtle outer border only */
+  border: 1px solid #e5e7eb;
+  border-radius: 8px;
+  overflow: hidden;
 }
 
 :deep(.v-data-table__td) {
   padding: 8px 12px !important;
+  font-size: 0.875rem !important;
+  font-weight: 500 !important;
+  color: #111827 !important;
 }
 
 :deep(.v-data-table__th) {
   padding: 12px !important;
-  font-weight: 600 !important;
-  color: #374151 !important;
+  font-weight: 500 !important;
+  font-size: 0.75rem !important;
+  color: #6b7280 !important;
+  text-transform: uppercase !important;
+  letter-spacing: 0.05em !important;
 }
 
 :deep(.v-table__wrapper) {
   overflow-x: auto;
+}
+
+/* Alternating row colors - subtle and elegant */
+:deep(.nadis-data-table tbody tr:nth-child(even)) {
+  background-color: #fafafa !important;
+}
+
+:deep(.nadis-data-table tbody tr:nth-child(odd)) {
+  background-color: #ffffff !important;
+}
+
+:deep(.nadis-data-table tbody tr:nth-child(even) td) {
+  background-color: #fafafa !important;
+}
+
+:deep(.nadis-data-table tbody tr:nth-child(odd) td) {
+  background-color: #ffffff !important;
+}
+
+/* Subtle hover effect for better interaction */
+:deep(.nadis-data-table tbody tr:hover) {
+  background-color: #f0f9ff !important;
+  transition: background-color 0.2s ease;
+}
+
+:deep(.nadis-data-table tbody tr:hover td) {
+  background-color: #f0f9ff !important;
+}
+
+/* Alternative selectors for maximum compatibility */
+:deep(.v-data-table tbody tr:nth-child(even)) {
+  background-color: #fafafa !important;
+}
+
+:deep(.v-data-table tbody tr:nth-child(odd)) {
+  background-color: #ffffff !important;
+}
+
+:deep(.v-data-table tbody tr:nth-child(even) td) {
+  background-color: #fafafa !important;
+}
+
+:deep(.v-data-table tbody tr:nth-child(odd) td) {
+  background-color: #ffffff !important;
+}
+
+:deep(.v-data-table tbody tr:hover) {
+  background-color: #f0f9ff !important;
+  transition: background-color 0.2s ease;
+}
+
+:deep(.v-data-table tbody tr:hover td) {
+  background-color: #f0f9ff !important;
 }

@@ -8,7 +8,6 @@ import { utils, writeFile } from 'xlsx'
 import {
   createGetDateFunction,
   createFindStateFunction,
-  createSortedComputed,
   BulkActionsToolbar
 } from './GenericDataTableView.vue'
 
@@ -72,38 +71,90 @@ export default defineComponent({
     const itemsPerPage = ref(20)
     const selectedReports = ref<LaboratoryReport[]>([])
     const sortBy = ref<any[]>([{ key: 'created_at', order: 'desc' }])
+    const currentPage = ref(1)
 
-    // Use shared sorting logic from GenericDataTableView
-    const sortedLaboratory = computed(createSortedComputed(laboratory, sortBy))
+    // Dynamic table configuration based on data availability
+    const tableConfig = computed(() => {
+      const dataCount = laboratory.value.length
+      // Use fixed height only when there are enough rows to benefit from scrolling
+      const needsScrolling = dataCount > 10
+      return {
+        height: needsScrolling ? '600px' : 'auto',
+        fixedHeader: needsScrolling
+      }
+    })
 
-    // Define table headers with exact column names from the original
-    const headers = ref([
-      { title: 'S/N', key: 'index', sortable: false, width: 60 },
-      { title: 'Created Date', key: 'created_at', sortable: true, width: 140 },
-      { title: 'Report State - LGA', key: 'state_lga', sortable: false, width: 180 },
-      { title: 'Name of Disease', key: 'disease', sortable: true, width: 180 },
-      { title: 'Other Diseases', key: 'other_diseases', sortable: false, width: 150 },
-      { title: 'Disease Suspicion code', key: 'sample_code', sortable: false, width: 180 },
-      { title: 'Dates - Received', key: 'date.date_received', sortable: false, width: 150 },
-      { title: 'Dates - Result Released', key: 'date.date_released', sortable: false, width: 180 },
-      { title: 'Location - Epiemioogical Unit', key: 'location.unit', sortable: false, width: 200 },
-      { title: 'Location - Farm Name', key: 'location.farm_name', sortable: false, width: 180 },
-      { title: 'Location - Location Address', key: 'location.location_address', sortable: false, width: 200 },
-      { title: 'Diagnostic Test', key: 'diagnostic_test', sortable: false, width: 150 },
-      { title: 'Samples', key: 'samples', sortable: false, width: 150 },
-      { title: 'Disease & Result - Name of Disease', key: 'disease_result_name', sortable: false, width: 240 },
-      { title: 'Disease & Result - Test Result', key: 'disease_result_test', sortable: false, width: 220 },
-      { title: 'Laboratory confirmation number', key: 'laboratory_confirmation', sortable: false, width: 220 },
-      { title: 'DVS Phone number', key: 'laboratory_dvs_number', sortable: false, width: 160 },
-      { title: 'Agent - Serotype', key: 'agent_serotype', sortable: false, width: 160 },
-      { title: 'Farmer\'s Phone Number', key: 'farmer_phone_number', sortable: false, width: 180 },
-      { title: 'Action', key: 'actions', sortable: false, width: 180 }
-    ])
+    // Create reactive values for pagination
+    const valuesRef = computed(() => {
+      let sort = false
+      let progress = false
+      if (selected_category.value == 'Approved') {
+        sort = true
+        progress = false
+      } else if (selected_category.value == 'Pending') {
+        sort = false
+        progress = false
+      } else if (selected_category.value == 'In Progress') {
+        sort = false
+        progress = true
+      }
+
+      return {
+        category: sort,
+        state: selected_state.value,
+        in_progress: progress
+      }
+    })
+
+    // Unified handler for all table option changes (page, itemsPerPage)
+    // This is the recommended Vuetify approach for v-data-table-server
+    const loadItems = ({ page, itemsPerPage }: any) => {
+      useLaboratory().getLaboratoryPage(valuesRef.value, page, itemsPerPage)
+    }
+
+    // Define all available columns with priority levels for responsive display
+    const allColumns = [
+      { title: 'S/N', key: 'index', sortable: false, width: 60, priority: 1 },
+      { title: 'Created Date', key: 'created_at', sortable: true, width: 140, priority: 1 },
+      { title: 'State - LGA', key: 'state_lga', sortable: false, width: 150, priority: 1 },
+      { title: 'Disease Name', key: 'disease', sortable: true, width: 150, priority: 2 },
+      { title: 'Other Diseases', key: 'other_diseases', sortable: false, width: 130, priority: 4 },
+      { title: 'Sample Code', key: 'sample_code', sortable: false, width: 130, priority: 3 },
+      { title: 'Date Received', key: 'date.date_received', sortable: false, width: 130, priority: 3 },
+      { title: 'Date Released', key: 'date.date_released', sortable: false, width: 130, priority: 3 },
+      { title: 'Epiemiological Unit', key: 'location.unit', sortable: false, width: 160, priority: 4 },
+      { title: 'Farm Name', key: 'location.farm_name', sortable: false, width: 140, priority: 2 },
+      { title: 'Location Address', key: 'location.location_address', sortable: false, width: 160, priority: 4 },
+      { title: 'Diagnostic Test', key: 'diagnostic_test', sortable: false, width: 130, priority: 2 },
+      { title: 'Samples', key: 'samples', sortable: false, width: 120, priority: 3 },
+      { title: 'Disease Result Name', key: 'disease_result_name', sortable: false, width: 160, priority: 3 },
+      { title: 'Test Result', key: 'disease_result_test', sortable: false, width: 130, priority: 2 },
+      { title: 'Lab Confirmation No.', key: 'laboratory_confirmation', sortable: false, width: 150, priority: 4 },
+      { title: 'DVS Phone', key: 'laboratory_dvs_number', sortable: false, width: 130, priority: 5 },
+      { title: 'Agent Serotype', key: 'agent_serotype', sortable: false, width: 130, priority: 4 },
+      { title: 'Farmer Phone', key: 'farmer_phone_number', sortable: false, width: 130, priority: 5 },
+      { title: 'Action', key: 'actions', sortable: false, width: 120, priority: 1 }
+    ]
+
+    // Column visibility controls
+    const columnVisibilityLevel = ref(3) // Show priorities 1-3 by default
+    
+    // Responsive headers based on user preference
+    const headers = computed(() => {
+      return allColumns.filter(col => col.priority <= columnVisibilityLevel.value)
+    })
+
+    // Toggle more/fewer columns
+    const toggleColumnVisibility = (level: number) => {
+      columnVisibilityLevel.value = level
+    }
 
     watch(selected_category, () => {
+      currentPage.value = 1
       getLaboratory()
     })
     watch(selected_state, () => {
+      currentPage.value = 1
       getLaboratory()
     })
     watch(successful, () => {
@@ -117,50 +168,8 @@ export default defineComponent({
     })
 
     const getLaboratory = () => {
-      let sort = false
-      let progress = false
-      if (selected_category.value == 'Approved') {
-        sort = true
-        progress = false
-      } else if (selected_category.value == 'Pending') {
-        sort = false
-        progress = false
-      } else if (selected_category.value == 'In Progress') {
-        sort = false
-        progress = true
-      }
-
-      const values = {
-        category: sort,
-        state: selected_state.value,
-        in_progress: progress
-      }
-      useLaboratory().getLaboratory(values)
-    }
-
-    const loadNextPage = () => {
-      let sort = false
-      let progress = false
-      if (selected_category.value == 'Approved') {
-        sort = true
-        progress = false
-      } else if (selected_category.value == 'Pending') {
-        sort = false
-        progress = false
-      } else if (selected_category.value == 'In Progress') {
-        sort = false
-        progress = true
-      }
-
-      const values = {
-        category: sort,
-        state: selected_state.value,
-        in_progress: progress
-      }
-
-      if (pagination.value.hasMore && !loading.value) {
-        useLaboratory().loadNextPage(values)
-      }
+      // Use the new page-based method for traditional pagination
+      useLaboratory().getLaboratoryPage(valuesRef.value, currentPage.value, itemsPerPage.value)
     }
 
     // Use shared utility functions
@@ -355,22 +364,26 @@ export default defineComponent({
 
     return {
       laboratory,
-      sortedLaboratory,
+      tableConfig,
       value,
       decline_form,
       doc_id,
       headers,
+      allColumns,
+      columnVisibilityLevel,
+      toggleColumnVisibility,
       itemsPerPage,
       selectedReports,
       sortBy,
+      currentPage,
       getDate,
       findState,
       closeModal,
       loading,
       pagination,
-      loadNextPage,
       performAction,
-      handleBulkAction
+      handleBulkAction,
+      loadItems
     }
   }
 })
@@ -385,20 +398,46 @@ export default defineComponent({
       @clear-selection="selectedReports = []"
     />
 
-    <!-- Vuetify Data Table -->
-    <v-data-table
+    <!-- Column Visibility Controls -->
+    <v-card class="mb-4 pa-3" elevation="1">
+      <div class="d-flex align-center gap-3">
+        <span class="text-subtitle-2 text-medium-emphasis">Column View:</span>
+        <v-btn-toggle
+          v-model="columnVisibilityLevel"
+          variant="outlined"
+          size="small"
+          mandatory
+        >
+          <v-btn :value="2" size="small">Essential</v-btn>
+          <v-btn :value="3" size="small">Standard</v-btn>
+          <v-btn :value="4" size="small">Detailed</v-btn>
+          <v-btn :value="5" size="small">Complete</v-btn>
+        </v-btn-toggle>
+        <v-spacer></v-spacer>
+        <span class="text-caption text-medium-emphasis">
+          Showing {{ headers.length }} of {{ allColumns.length }} columns
+        </span>
+      </div>
+    </v-card>
+
+    <!-- Vuetify Data Table Server -->
+    <v-data-table-server
       v-model="selectedReports"
       v-model:items-per-page="itemsPerPage"
       v-model:sort-by="sortBy"
+      v-model:page="currentPage"
       :headers="headers"
-      :items="sortedLaboratory"
+      :items="laboratory"
       :loading="loading"
+      :items-per-page-options="[10, 20, 50, 100]"
+      :items-length="pagination.totalCount"
       show-select
       return-object
       item-value="doc_id"
       class="elevation-1"
-      fixed-header
-      height="600px"
+      :fixed-header="tableConfig.fixedHeader"
+      :height="tableConfig.height"
+      @update:options="loadItems"
     >
       <!-- Serial Number Column -->
       <template v-slot:item.index="{ index }">
@@ -511,25 +550,7 @@ export default defineComponent({
           </div>
         </div>
       </template>
-
-      <!-- Bottom Slot for Load More -->
-      <template v-slot:bottom>
-        <div class="text-center pa-4">
-          <v-btn
-            v-if="pagination.hasMore"
-            @click="loadNextPage"
-            :loading="loading"
-            color="primary"
-            variant="outlined"
-          >
-            Load More
-          </v-btn>
-          <div v-else class="text-sm text-gray-500">
-            All reports loaded ({{ laboratory.length }} total)
-          </div>
-        </div>
-      </template>
-    </v-data-table>
+    </v-data-table-server>
 
     <!-- Decline Form Modal -->
     <laboratory-decline-form

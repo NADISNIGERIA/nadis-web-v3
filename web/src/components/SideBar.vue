@@ -70,7 +70,7 @@ export default defineComponent({
           <div class="flex flex-col min-w-0 flex-1">
             <h1 class="text-xl lg:text-2xl font-bold text-white tracking-tight">NADIS</h1>
             <p class="text-xs text-white text-opacity-80 font-medium tracking-wide hidden lg:block leading-relaxed pr-2">
-              Nigeria Animal Disease Info System
+              National Animal Disease Information System
             </p>
           </div>
         </div>

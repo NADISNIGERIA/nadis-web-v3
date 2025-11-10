@@ -89,7 +89,7 @@ export default defineComponent({
           <img src="/img/coat_of_arms.svg" alt="Nigeria Coat of Arms" class="w-12 h-12 mr-4">
           <div class="text-center">
             <h1 class="text-2xl font-bold">NADIS</h1>
-            <p class="text-sm opacity-90">Nigeria Animal Disease Information System</p>
+            <p class="text-sm opacity-90">National Animal Disease Information System</p>
           </div>
         </div>
         <div class="text-center">

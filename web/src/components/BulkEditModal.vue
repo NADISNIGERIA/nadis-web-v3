@@ -51,7 +51,7 @@ export default defineComponent({
         </label>
         <select
           v-model="selectedStatus"
-          class="w-full px-3 py-2 border border-gray-300 rounded-md shadow-sm focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-blue-500"
+          class="w-full px-3 py-2 border border-gray-300 rounded-md shadow-sm focus:outline-none focus:ring-2 focus:ring-green-500 focus:border-green-500"
         >
           <option value="">-- Select Status --</option>
           <option value="pending">Pending</option>
@@ -74,7 +74,7 @@ export default defineComponent({
           :class="[
             'px-4 py-2 text-sm font-medium text-white rounded-md focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-blue-500',
             selectedStatus
-              ? 'bg-blue-600 hover:bg-blue-700'
+              ? 'bg-green-600 hover:bg-green-700'
               : 'bg-gray-400 cursor-not-allowed'
           ]"
         >
